@@ -11,18 +11,20 @@ Version 1.0.0. Time zone `Asia/Kolkata` (`TZ` in `src/Code.js` and `timeZone` in
 ## System context
 
 ```mermaid
-flowchart LR
-  member["Team member"] --> sheet["Google Sheet"]
+flowchart TD
+  member["Team member"] -->|logs a row| sheet["Google Sheet"]
   menu["Daily Progress menu"] --> script["Apps Script"]
   trigger["Time triggers"] --> script
-  sheet --> script
-  props["Script Properties"] --> script
-  script --> chat["Google Chat incoming webhook"]
-  script --> mail["Gmail via MailApp"]
-  script -.-> llm["OpenRouter optional"]
+  props["Script Properties"] -->|webhook URL and optional key| script
+  sheet -->|rows, matrix, stored summaries| script
+  script -->|reminder email| mail["Gmail via MailApp"]
+  script -->|daily post via webhook| chat["Google Chat space"]
+  script -.->|Monday only, when a key is set| llm["OpenRouter"]
+  llm -.->|summary written to Weekly Space Summaries| sheet
+  sheet -->|Monday webhook posts that stored summary| chat
 ```
 
-The dashed line is the only path that sends progress text outside Google, and only for a weekly summary.
+OpenRouter is not a destination. On Monday the script may send one space's previous-week text out, write the reply onto **Weekly Space Summaries**, and only then post that stored text through the space's incoming webhook. If the key is unset or the call fails, the webhook posts the member lines already saved on **Weekly Rollup**. The dashed arrows are the only path that sends progress text outside Google.
 
 ## Components
 
