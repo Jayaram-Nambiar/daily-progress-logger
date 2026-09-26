@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# clasp credentials and the bound script id (use .clasp.json.example)
+.clasprc.json
+.clasp.json
+
+# Secrets and local env
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials.json
+client_secret*.json
+token.json
+service-account*.json
+
+# Editor and agent artifacts (do not publish)
+.cursor/
+.agent-context.json
+AGENTS.md
+context/
+agent-transcripts/
+
+# Logs and OS junk
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+desktop.ini

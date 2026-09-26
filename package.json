@@ -1,0 +1,14 @@
+{
+  "name": "daily-progress-logger",
+  "version": "1.0.0",
+  "description": "Spreadsheet-bound Apps Script template that posts daily progress to Google Chat incoming webhooks.",
+  "license": "MIT",
+  "scripts": {
+    "pull": "clasp pull",
+    "push": "clasp push",
+    "test": "node --test test/logic.test.js"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}
