@@ -1,0 +1,25 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Unit tests and syntax
+        run: |
+          npm test
+          node --check src/Code.js
+          node --check src/logic.js
+      - name: Refuse tracked secret files
+        run: |
+          if git ls-files | grep -E '(^|/)\.clasp\.json$|(^|/)\.clasprc\.json$|(^|/)\.env$|(^|/)\.env\.'; then
+            echo "Tracked secret file. Remove it before publishing."
+            exit 1
+          fi

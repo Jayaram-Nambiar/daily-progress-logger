@@ -22,6 +22,7 @@
  * Webhook URLs and API keys are Script Properties, not source.
  * EXAMPLE_ROSTER, EXAMPLE_SPACE_ROWS, and EXAMPLE_CHAT_USER_IDS are fictional.
  * Replace them with your own team before you rely on provision.
+ * Design notes: docs/architecture.md and docs/decisions/001-incoming-webhooks.md.
  *******************************************************/
 
 const TZ = 'Asia/Kolkata';

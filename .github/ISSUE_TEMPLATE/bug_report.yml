@@ -1,0 +1,30 @@
+name: Bug report
+description: Something in the template does not match the documented behavior.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste webhook URLs, API keys, script ids, access tokens, or real personal data. Use the fictional names from the docs when you need an example.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened
+      description: What the script or the docs did, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: Menu numbers, sheet names, and whether this was a trigger or a manual run.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      placeholder: "1.0.0 or a commit SHA"
+    validations:
+      required: true

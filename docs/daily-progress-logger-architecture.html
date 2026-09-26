@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Progress Logger Architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #020617;
+      min-height: 100vh;
+      padding: 2rem;
+      color: white;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot {
+      width: 12px; height: 12px; background: #22d3ee; border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.875rem; margin-left: 1.75rem; }
+    .diagram-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 1rem;
+      border: 1px solid #1e293b;
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 0.75rem;
+      border: 1px solid #1e293b;
+      padding: 1.25rem;
+    }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-dot.cyan { background: #22d3ee; }
+    .card-dot.emerald { background: #34d399; }
+    .card-dot.violet { background: #a78bfa; }
+    .card-dot.amber { background: #fbbf24; }
+    .card-dot.rose { background: #fb7185; }
+    .card h3 { font-size: 0.875rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.75rem; }
+    .card li { margin-bottom: 0.375rem; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row">
+        <div class="pulse-dot"></div>
+        <h1>Daily Progress Logger</h1>
+      </div>
+      <p class="subtitle">Spreadsheet-bound Apps Script. Chat via incoming webhooks. Secrets stay in Script Properties.</p>
+    </div>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1100 700" role="img" aria-label="Architecture of Daily Progress Logger">
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#020617" />
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Arrows before boxes so the opaque box underlay covers the shafts -->
+        <line x1="168" y1="132" x2="228" y2="132" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="430" y1="132" x2="488" y2="132" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="710" y1="132" x2="768" y2="132" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+        <line x1="330" y1="164" x2="330" y2="218" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="600" y1="164" x2="600" y2="218" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="330" y1="282" x2="330" y2="438" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <line x1="600" y1="282" x2="600" y2="438" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path d="M 710 150 L 742 150 L 742 400 L 895 400 L 895 438" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrowhead)"/>
+        <text x="752" y="392" fill="#94a3b8" font-size="9">optional</text>
+
+        <!-- Workspace boundary -->
+        <rect x="200" y="36" width="860" height="280" rx="12" fill="rgba(251, 191, 36, 0.05)" stroke="#fbbf24" stroke-width="1" stroke-dasharray="8,4"/>
+        <text x="216" y="56" fill="#fbbf24" font-size="11" font-weight="600">Google account · default Apps Script project</text>
+
+        <!-- Members -->
+        <rect x="28" y="100" width="140" height="64" rx="6" fill="#0f172a"/>
+        <rect x="28" y="100" width="140" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="98" y="126" fill="white" font-size="12" font-weight="600" text-anchor="middle">Team members</text>
+        <text x="98" y="144" fill="#94a3b8" font-size="9" text-anchor="middle">Edit personal tabs</text>
+
+        <!-- Sheet -->
+        <rect x="230" y="100" width="200" height="64" rx="6" fill="#0f172a"/>
+        <rect x="230" y="100" width="200" height="64" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="330" y="126" fill="white" font-size="12" font-weight="600" text-anchor="middle">Google Sheet</text>
+        <text x="330" y="144" fill="#94a3b8" font-size="9" text-anchor="middle">System of record</text>
+
+        <!-- Apps Script -->
+        <rect x="490" y="100" width="220" height="64" rx="6" fill="#0f172a"/>
+        <rect x="490" y="100" width="220" height="64" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+        <text x="600" y="126" fill="white" font-size="12" font-weight="600" text-anchor="middle">Apps Script</text>
+        <text x="600" y="144" fill="#94a3b8" font-size="9" text-anchor="middle">Code.js calls logic.js</text>
+
+        <!-- Secrets -->
+        <rect x="770" y="100" width="250" height="64" rx="6" fill="#0f172a"/>
+        <rect x="770" y="100" width="250" height="64" rx="6" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1.5"/>
+        <text x="895" y="126" fill="white" font-size="12" font-weight="600" text-anchor="middle">Script Properties</text>
+        <text x="895" y="144" fill="#94a3b8" font-size="9" text-anchor="middle">Webhook URLs and API key</text>
+
+        <!-- Menu -->
+        <rect x="230" y="220" width="200" height="62" rx="6" fill="#0f172a"/>
+        <rect x="230" y="220" width="200" height="62" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="330" y="244" fill="white" font-size="12" font-weight="600" text-anchor="middle">Daily Progress menu</text>
+        <text x="330" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">Manual runs</text>
+
+        <!-- Triggers -->
+        <rect x="490" y="220" width="220" height="62" rx="6" fill="#0f172a"/>
+        <rect x="490" y="220" width="220" height="62" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="600" y="244" fill="white" font-size="12" font-weight="600" text-anchor="middle">Time triggers</text>
+        <text x="600" y="262" fill="#94a3b8" font-size="9" text-anchor="middle">From the Schedules sheet</text>
+
+        <!-- External receivers. Region ends at y=316. These start at y=440. -->
+        <rect x="230" y="440" width="200" height="64" rx="6" fill="#0f172a"/>
+        <rect x="230" y="440" width="200" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="330" y="466" fill="white" font-size="12" font-weight="600" text-anchor="middle">Google Chat</text>
+        <text x="330" y="484" fill="#94a3b8" font-size="9" text-anchor="middle">Incoming webhook POST</text>
+
+        <rect x="500" y="440" width="200" height="64" rx="6" fill="#0f172a"/>
+        <rect x="500" y="440" width="200" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="600" y="466" fill="white" font-size="12" font-weight="600" text-anchor="middle">Gmail</text>
+        <text x="600" y="484" fill="#94a3b8" font-size="9" text-anchor="middle">One reminder per person</text>
+
+        <rect x="770" y="440" width="250" height="64" rx="6" fill="#0f172a"/>
+        <rect x="770" y="440" width="250" height="64" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="895" y="466" fill="white" font-size="12" font-weight="600" text-anchor="middle">OpenRouter</text>
+        <text x="895" y="484" fill="#94a3b8" font-size="9" text-anchor="middle">Optional weekly summary</text>
+
+        <!-- Legend sits below the lowest box (y=504) -->
+        <text x="28" y="560" fill="white" font-size="11" font-weight="600">Legend</text>
+        <rect x="28" y="574" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="50" y="583" fill="#94a3b8" font-size="9">Menu</text>
+        <rect x="120" y="574" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+        <text x="142" y="583" fill="#94a3b8" font-size="9">Apps Script</text>
+        <rect x="250" y="574" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="272" y="583" fill="#94a3b8" font-size="9">Workbook</text>
+        <rect x="370" y="574" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="392" y="583" fill="#94a3b8" font-size="9">Triggers</text>
+        <rect x="480" y="574" width="16" height="10" rx="2" fill="rgba(136, 19, 55, 0.4)" stroke="#fb7185" stroke-width="1"/>
+        <text x="502" y="583" fill="#94a3b8" font-size="9">Secrets</text>
+        <rect x="580" y="574" width="16" height="10" rx="2" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1"/>
+        <text x="602" y="583" fill="#94a3b8" font-size="9">External</text>
+        <line x1="700" y1="579" x2="724" y2="579" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="732" y="583" fill="#94a3b8" font-size="9">Secret or optional call</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>Workbook</h3>
+        </div>
+        <ul>
+          <li>• Team, Chat Spaces, Reminder Matrix, Schedules</li>
+          <li>• One personal tab per member</li>
+          <li>• Weekly Rollup and Weekly Space Summaries</li>
+          <li>• Cells hold property names, not webhook URLs</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Clock jobs</h3>
+        </div>
+        <ul>
+          <li>• Weekdays 18:00 reminder, 19:00 daily post</li>
+          <li>• Monday 09:00 previous-week roll-up</li>
+          <li>• Asia/Kolkata unless both time zone settings change</li>
+          <li>• Space access stays off unless column E should reapply</li>
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot rose"></div>
+          <h3>Boundary</h3>
+        </div>
+        <ul>
+          <li>• No Google Chat API and no standard Cloud project</li>
+          <li>• Slack path is present and does not send</li>
+          <li>• OpenRouter runs only when a key is stored</li>
+          <li>• clasp push does not upload Script Properties</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">
+      Daily Progress Logger · MIT · Diagram adapted from the Hermes Agent architecture-diagram skill (MIT; Cocoon AI)
+    </p>
+  </div>
+</body>
+</html>

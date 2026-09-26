@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security and conduct reports
+    url: https://github.com/Jayaram-Nambiar/daily-progress-logger/security/advisories/new
+    about: Report a vulnerability or a code of conduct issue in private. Do not paste secrets.

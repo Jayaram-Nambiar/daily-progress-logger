@@ -1,0 +1,29 @@
+Daily Progress Logger
+Copyright (c) 2026 Jayaram Nambiar
+
+This project is licensed under the MIT License. See LICENSE.
+
+Third-party material
+--------------------
+
+@google/clasp
+  Development dependency declared in package.json.
+  Apache License 2.0.
+  https://github.com/google/clasp
+  The clasp source is not vendored in this repository.
+
+docs/daily-progress-logger-architecture.html
+  Layout and palette adapted from the Hermes Agent architecture-diagram skill,
+  which is MIT licensed and based on Cocoon AI's architecture-diagram-generator
+  (MIT): https://github.com/Cocoon-AI/architecture-diagram-generator
+  The diagram content describes this project.
+
+CODE_OF_CONDUCT.md
+  Adapted from the Contributor Covenant, version 2.1.
+  https://www.contributor-covenant.org/version/2/1/code_of_conduct.html
+  Creative Commons Attribution 4.0 International (CC BY 4.0).
+
+Google Apps Script, Google Sheets, Google Chat, and Gmail are products of
+Google. OpenRouter (https://openrouter.ai/) is an optional external API.
+Model ids named in the source are public identifiers, not credentials.
+None of those products' code is included in this repository.
