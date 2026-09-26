@@ -2,7 +2,7 @@
 
 Operational steps for a new spreadsheet. Each step says what to do, why that order matters, and what fails if you skip the constraint. Names in examples are fictional. Put real people only in your spreadsheet and Script Properties, never in git.
 
-Architecture: [architecture.md](architecture.md). Sample headers: [workbook-sample.md](workbook-sample.md).
+Architecture: [architecture.md](architecture.md). Sample workbook: [workbook-sample.md](workbook-sample.md) and [workbook-sample.xlsx](workbook-sample.xlsx).
 
 ## Current application
 
@@ -36,9 +36,10 @@ node --check src/logic.js
 
 **Do this**
 
-1. Create a Google Sheet.
-2. **Extensions → Apps Script**.
-3. Copy the script id from the editor URL: `https://script.google.com/home/projects/SCRIPT_ID/edit`.
+1. Create a Google Sheet. A blank file is enough. `npm install` does not create one.
+2. Optional: upload [workbook-sample.xlsx](workbook-sample.xlsx) to Drive and open it with Google Sheets if you want the fictional rows already filled in. That file is an example, not a setup step. It has no webhook URL. Chips and checkboxes may not survive the conversion. Details are in [workbook-sample.md](workbook-sample.md).
+3. **Extensions → Apps Script**.
+4. Copy the script id from the editor URL: `https://script.google.com/home/projects/SCRIPT_ID/edit`.
 
 ```powershell
 npx clasp login
@@ -68,6 +69,7 @@ Reload the spreadsheet and accept the consent screen. Confirm **Project Settings
 - If clasp prints `Skipping push` after an OAuth scope change in a non-interactive shell, run `npx clasp push --force`. That flag forces the clasp upload. It is not a git force-push.
 - `.clasp.json` holds your script id. `.clasprc.json` holds your clasp login. Both are gitignored. Do not commit them.
 - `npm run push` does not change Script Properties, triggers, or sheet cells. `npm run pull` overwrites local `src/` with whatever is in the Apps Script project. Pull only when the editor is the source you intend to keep.
+- The sample workbook already contains the fictional people. If you imported it and then point `EXAMPLE_ROSTER` at a real team, menu 4 adds the real people and leaves Alex, Sam, and Jordan in place. Delete those rows yourself before you treat the sheet as production.
 
 ## 3. Replace the fictional roster before provision
 

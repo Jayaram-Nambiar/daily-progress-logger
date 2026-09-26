@@ -17,7 +17,7 @@ This repository is a generic template. Names, emails, space ids, and Chat user i
 
 ## The workbook
 
-Everything the script reads or writes is a tab in one Google Sheet. The sample in [docs/workbook-sample.md](docs/workbook-sample.md) uses the same headers with invented people.
+Everything the script reads or writes is a tab in one Google Sheet. [docs/workbook-sample.md](docs/workbook-sample.md) and [docs/workbook-sample.xlsx](docs/workbook-sample.xlsx) show the same fictional rows. `npm install` does not create this sheet. Menu **4** builds the empty tabs on a blank Sheet. The `.xlsx` is there so you can see the filled example, and you can upload it to Drive only if you want those sample rows in your account.
 
 Four tabs describe the team and the clock. People do not log work here.
 
@@ -128,7 +128,8 @@ The project is maintained by [Jayaram Nambiar](https://github.com/Jayaram-Nambia
 | `test/logic.test.js` | Node tests |
 | `docs/runbook.md` | Setup and day-to-day steps, with the reason and the pitfalls for each |
 | `docs/architecture.md` | Components, sequences, and trust boundary |
-| `docs/workbook-sample.md` | Fictional workbook |
+| `docs/workbook-sample.md` | Fictional workbook, as tables |
+| `docs/workbook-sample.xlsx` | The same fictional workbook, as a file |
 | `docs/decisions/` | Architecture decision records |
 
 ## Run it locally

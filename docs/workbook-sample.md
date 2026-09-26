@@ -2,6 +2,21 @@
 
 This is a **fictional** picture of the workbook the script expects. Headers match `src/Code.js`. Every name, email, Slack id, Chat user id, space id, summary, and checkbox below is invented. None of it is copied from a live spreadsheet.
 
+The same rows are in [workbook-sample.xlsx](workbook-sample.xlsx). `npm install` does not create a Google Sheet and does not upload this file. The script builds an empty workbook of the same shape when you run menu **4** on a blank Sheet. Open the `.xlsx` when you want to see the tabs, including the example log rows and weekly tables that menu 4 does not invent.
+
+Uploading it is optional. To look at it as a Google Sheet in your own account:
+
+1. In Google Drive, choose **New → File upload** and select `docs/workbook-sample.xlsx`.
+2. Right-click the uploaded file and choose **Open with → Google Sheets**. Drive keeps the `.xlsx` and adds a Sheet.
+
+Then bind Apps Script to that Sheet and continue at [runbook step 2](runbook.md). The file contains no webhook URL and no API key.
+
+What the conversion does not keep:
+
+- Team column E is comma-separated text. Google Sheets multi-select chips cannot be stored in Excel. Create that dropdown once in the Sheets UI, as the runbook describes.
+- Checkboxes may arrive as `TRUE` / `FALSE` text. Click them so they are real checkboxes before you run menu **14** or rely on reminders. **Configured** is false in the sample until a Script Property has a URL.
+- Space access is off in the sample. A blank Sheet that the script creates will insert that job as enabled. Uncheck it there too unless you want the weekday reapply.
+
 Personal tabs use the member's name as the sheet name (`Alex Rivera`, `Sam Chen`, `Jordan Patel`).
 
 ## Team
