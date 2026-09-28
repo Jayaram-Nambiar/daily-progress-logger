@@ -31,7 +31,9 @@ Monday's weekly post can be long when several people logged rows. A short summar
 
 ## Decision
 
-We choose **Option B**. Defaults are `meta-llama/llama-3.3-70b-instruct:free`, then `deepseek/deepseek-v4-flash:free`. `OPENROUTER_ENABLED=0` skips the call and keeps the key. Spaces with no previous-week rows are skipped: no model call and no Chat post.
+We choose **Option B**. Defaults are `google/gemma-4-31b-it:free`, then `qwen/qwen3.8-27b:free`, then the `openrouter/free` router. `OPENROUTER_ENABLED=0` skips the call and keeps the key. Spaces with no previous-week rows are skipped: no model call and no Chat post.
+
+Update (2026-09-28): `meta-llama/llama-3.3-70b-instruct:free` and `deepseek/deepseek-v4-flash:free` no longer exist on the free catalog and return HTTP 404. `resolveOpenRouterModels` drops those ids even when `OPENROUTER_MODEL` still lists them, then tries `openrouter/free`. The chat request sets `reasoning.effort` to `none` so a thinking model does not spend the token budget and return empty `content`.
 
 The prompt is `Logic.WEEKLY_SUMMARY_SYSTEM` in `src/logic.js`. Successful text is stored on **Weekly Space Summaries** and is not a secret.
 

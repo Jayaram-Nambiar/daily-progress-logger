@@ -312,5 +312,63 @@ var Logic = {
     });
     if (free.length) return free;
     return Logic.parseOpenRouterModels(fallbackCsv, '');
+  },
+
+  /**
+   * Ids that used to be free and now 404. A stored OPENROUTER_MODEL value
+   * often still lists them; trying them burns the free-tier quota.
+   */
+  RETIRED_OPENROUTER_MODELS: {
+    'meta-llama/llama-3.3-70b-instruct:free': true,
+    'deepseek/deepseek-v4-flash:free': true
+  },
+
+  /** Zero-price router. It does not end in ":free", but it does not bill. */
+  FREE_ROUTER: 'openrouter/free',
+
+  isFreeOpenRouterModel: function (id) {
+    var model = String(id || '').trim();
+    if (!model || Logic.RETIRED_OPENROUTER_MODELS[model]) return false;
+    if (model === Logic.FREE_ROUTER) return true;
+    return /:free$/i.test(model);
+  },
+
+  /**
+   * Live free ids from the stored list, else from fallbackCsv.
+   * Always ends with the free router so a later roster change still has a target.
+   */
+  resolveOpenRouterModels: function (storedCsv, fallbackCsv) {
+    function take(list) {
+      var seen = {};
+      var out = [];
+      (list || []).forEach(function (model) {
+        var id = String(model || '').trim();
+        if (!id || seen[id] || !Logic.isFreeOpenRouterModel(id)) return;
+        seen[id] = true;
+        out.push(id);
+      });
+      return out;
+    }
+    var live = take(Logic.parseOpenRouterModels(storedCsv, ''));
+    if (!live.length) live = take(Logic.parseOpenRouterModels(fallbackCsv, ''));
+    if (live.indexOf(Logic.FREE_ROUTER) < 0) live.push(Logic.FREE_ROUTER);
+    return live;
+  },
+
+  /**
+   * Summaries are short. effort "none" keeps the reply in message.content
+   * instead of spending max_tokens on reasoning and returning empty content.
+   */
+  openRouterChatBody: function (model, systemPrompt, userPrompt) {
+    return {
+      model: model,
+      temperature: 0.2,
+      max_tokens: 700,
+      reasoning: { effort: 'none' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ]
+    };
   }
 };

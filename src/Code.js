@@ -16,7 +16,7 @@
  * Monday weekly posts may send an OpenRouter summary-only message per
  * configured webhook space when OPENROUTER_API_KEY is set. Failures fall
  * back to the member detail text. Default models:
- * meta-llama/llama-3.3-70b-instruct:free then deepseek/deepseek-v4-flash:free.
+ * google/gemma-4-31b-it:free then qwen/qwen3.8-27b:free, then openrouter/free.
  * Final fallback: post the space's member week text unchanged.
  * The script never calls the Google Chat API and stays on the default GCP project.
  * Webhook URLs and API keys are Script Properties, not source.
@@ -43,7 +43,7 @@ const PROP_KEYS = {
   OPENROUTER_ENABLED: 'OPENROUTER_ENABLED'
 };
 const DEFAULT_OPENROUTER_MODELS =
-  'meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-v4-flash:free';
+  'google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const TEAM_HEADERS = ['Name', 'Slack', 'Email', 'Chat'];
 const SCHEDULE_HEADERS = ['Job', 'Enabled', 'Days', 'Hour', 'Minute'];
@@ -673,46 +673,54 @@ function postDailyUpdatesToChat_(opts) {
     return;
   }
   const spaceCol = MEMBER_HEADERS.indexOf('Space');
-  let posted = 0;
-
-  configured.forEach(space => {
-    const spaceName = space.name;
-    const webhook = space.webhook;
-
-    const blocks = [];
-    members.forEach(m => {
-      const sh = ss.getSheetByName(sanitizeSheetName_(m.name));
-      if (!sh || sh.getLastRow() < 2) return;
-      const n = sh.getLastRow() - 1;
-      const rows = sh.getRange(2, 1, n, MEMBER_HEADERS.length).getValues();
-      const lines = [];
-      rows.forEach(row => {
-        const rowDate = normalizeDateOnly_(row[0]);
-        const summary = (row[1] || '').toString().trim();
-        const space = (row[spaceCol] || '').toString().trim();
-        if (rowDate !== today || !summary || space !== spaceName) return;
-        const hoursNum = parseHoursToNumber_(row[2]);
-        const blockers = (row[3] || '').toString().trim();
-        const plan = (row[4] || '').toString().trim();
-        let line = '– ' + summary;
-        if (hoursNum) line += ` (${round1_(hoursNum)}h)`;
-        if (blockers) line += ` • Blockers: ${blockers}`;
-        lines.push(line);
-        if (plan) lines.push('   → Tomorrow: ' + plan);
-      });
-      if (!lines.length) return;
-      blocks.push('• ' + chatLabel_(m));
-      lines.forEach(line => blocks.push('   ' + line));
-      blocks.push('');
-    });
-
-    if (!blocks.length) return;
-    const text = [`*Daily Progress — ${spaceName} — ${today}*`, ''].concat(blocks).join('\n');
+  const blocksBySpace = {};
+  // One read per member. Reading the sheet again for every space makes
+  // SpreadsheetApp fail with "a server error occurred" and posts nothing.
+  members.forEach(m => {
+    const sh = ss.getSheetByName(sanitizeSheetName_(m.name));
+    if (!sh || sh.getLastRow() < 2) return;
+    const n = sh.getLastRow() - 1;
+    let rows;
     try {
-      sendToChat_(webhook, text);
+      rows = sh.getRange(2, 1, n, MEMBER_HEADERS.length).getValues();
+    } catch (e) {
+      console.error('Daily post could not read ' + m.name + ': ' + ((e && e.message) ? e.message : e));
+      return;
+    }
+    const linesBySpace = {};
+    rows.forEach(row => {
+      const rowDate = normalizeDateOnly_(row[0]);
+      const summary = Logic.truncateText((row[1] || '').toString().trim(), 800);
+      const spaceName = (row[spaceCol] || '').toString().trim();
+      if (rowDate !== today || !summary || !spaceName) return;
+      const hoursNum = parseHoursToNumber_(row[2]);
+      const blockers = Logic.truncateText((row[3] || '').toString().trim(), 400);
+      const plan = Logic.truncateText((row[4] || '').toString().trim(), 400);
+      if (!linesBySpace[spaceName]) linesBySpace[spaceName] = [];
+      let line = '– ' + summary;
+      if (hoursNum) line += ` (${round1_(hoursNum)}h)`;
+      if (blockers) line += ` • Blockers: ${blockers}`;
+      linesBySpace[spaceName].push(line);
+      if (plan) linesBySpace[spaceName].push('   → Tomorrow: ' + plan);
+    });
+    Object.keys(linesBySpace).forEach(spaceName => {
+      if (!blocksBySpace[spaceName]) blocksBySpace[spaceName] = [];
+      blocksBySpace[spaceName].push('• ' + chatLabel_(m));
+      linesBySpace[spaceName].forEach(line => blocksBySpace[spaceName].push('   ' + line));
+      blocksBySpace[spaceName].push('');
+    });
+  });
+
+  let posted = 0;
+  configured.forEach(space => {
+    const blocks = blocksBySpace[space.name];
+    if (!blocks || !blocks.length) return;
+    const text = [`*Daily Progress — ${space.name} — ${today}*`, ''].concat(blocks).join('\n');
+    try {
+      sendToChat_(space.webhook, text);
       posted++;
     } catch (e) {
-      console.error('Daily post failed for ' + spaceName + ': ' + ((e && e.message) ? e.message : e));
+      console.error('Daily post failed for ' + space.name + ': ' + ((e && e.message) ? e.message : e));
       if (!silent) throw e;
     }
   });
@@ -1278,16 +1286,15 @@ function setOpenRouterApiKey() {
 }
 
 /**
- * Free-tier OpenRouter model ids only (:free suffix). If the stored list has none,
- * use DEFAULT_OPENROUTER_MODELS so a leftover paid model id cannot break free accounts.
+ * Live free-tier ids. Retired :free ids in OPENROUTER_MODEL are dropped.
+ * openrouter/free is always last so a stale property still reaches a live model.
  */
 function openRouterModelList_() {
   const props = PropertiesService.getScriptProperties();
-  const parsed = Logic.parseOpenRouterModels(
+  return Logic.resolveOpenRouterModels(
     props.getProperty(PROP_KEYS.OPENROUTER_MODEL),
     DEFAULT_OPENROUTER_MODELS
   );
-  return Logic.preferFreeOpenRouterModels(parsed, DEFAULT_OPENROUTER_MODELS);
 }
 
 /**
@@ -1313,15 +1320,7 @@ function summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
-    const body = {
-      model: model,
-      temperature: 0.2,
-      max_tokens: 700,
-      messages: [
-        { role: 'system', content: Logic.WEEKLY_SUMMARY_SYSTEM },
-        { role: 'user', content: userPrompt }
-      ]
-    };
+    const body = Logic.openRouterChatBody(model, Logic.WEEKLY_SUMMARY_SYSTEM, userPrompt);
     try {
       let res = UrlFetchApp.fetch(OPENROUTER_URL, {
         method: 'post',
@@ -1485,6 +1484,7 @@ function parseHoursToNumber_(val) {
 
   const s = String(val).trim();
   if (!s) return 0;
+  if (s.length > 48) return 0;
 
   // H:MM (e.g., 1:30)
   let m = s.match(/^\s*(\d+)\s*:\s*([0-5]?\d)\s*$/);

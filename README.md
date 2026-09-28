@@ -110,7 +110,7 @@ Version 1.0.0.
 | Time zone | `Asia/Kolkata`, set in both `src/appsscript.json` and `TZ` in `src/Code.js`. Change both, or "today" and the trigger hour will disagree. |
 | Slack | The code is present. `SLACK_ENABLED` is `false`, so it does not send. |
 | Chat API | Not used. Do not add `projectId` to `.clasp.json`, and do not switch the Cloud project in the Apps Script editor. |
-| OpenRouter | Off until menu **18** stores a key. Only model ids ending in `:free` are sent. |
+| OpenRouter | Off until menu **18** stores a key. Only `:free` ids and `openrouter/free` are sent. Retired free ids are skipped. |
 
 ## About
 
@@ -173,7 +173,7 @@ const EXAMPLE_ROSTER = [
 3. Store each space's incoming webhook in Script Properties. Menu **5** writes only `GOOGLE_CHAT_WEBHOOK_URL` (the example primary space `TEAM_ALPHA`). Other spaces use the property name in **Chat Spaces** column C.
 4. On Team cell E2, create a multi-select dropdown from `Chat Spaces!A2:A` in the Sheets UI. Apps Script cannot create that chip control. Then run menu **16**.
 5. Uncheck **Space access** on the Schedules sheet and run menu **14) Apply schedules**.
-6. Optional weekly summaries: menu **18) Set OpenRouter API key**. Defaults: `meta-llama/llama-3.3-70b-instruct:free`, then `deepseek/deepseek-v4-flash:free`. Set Script Property `OPENROUTER_ENABLED` to `0` to skip the model without deleting the key. Clear the **Weekly Space Summaries** row for that week and space if you want a fresh reply. The next Monday post reads whatever is stored there.
+6. Optional weekly summaries: menu **18) Set OpenRouter API key**. Defaults: `google/gemma-4-31b-it:free`, then `qwen/qwen3.8-27b:free`, then `openrouter/free`. Retired free ids stored in `OPENROUTER_MODEL` are skipped. Set Script Property `OPENROUTER_ENABLED` to `0` to skip the model without deleting the key. Clear the **Weekly Space Summaries** row for that week and space if you want a fresh reply. The next Monday post reads whatever is stored there.
 
 ## Secrets
 

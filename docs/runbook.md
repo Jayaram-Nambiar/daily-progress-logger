@@ -176,7 +176,7 @@ Uncheck **Space access** unless you want a weekday job that only reapplies colum
 3. Default models, in order:
 
 ```text
-meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-v4-flash:free
+google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free
 ```
 
 4. Set Script Property `OPENROUTER_ENABLED` to `0` to skip the model without deleting the key.
@@ -185,7 +185,7 @@ meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-v4-flash:free
 
 **Pitfalls**
 
-- Only model ids that end in `:free` are sent. Any other id is dropped. If none remain, the default free list is used.
+- Only `:free` ids and `openrouter/free` are sent. Paid ids are dropped. Retired ids `meta-llama/llama-3.3-70b-instruct:free` and `deepseek/deepseek-v4-flash:free` are dropped even if `OPENROUTER_MODEL` still lists them. The free router is always tried last. If no live id remains, the default list above is used.
 - A space with no previous-week rows is skipped. No model call, no Chat post.
 - A stored row on **Weekly Space Summaries** is reused. Clear that row to force a new summary. Menu 9 does not set `forceSummary`.
 - The call sends the progress text and the spreadsheet URL (`HTTP-Referer`) to OpenRouter. Do not enable the key if that text must stay inside Google.
@@ -239,4 +239,5 @@ Reload the spreadsheet after a push so `onOpen` rebuilds the menu.
 2. Confirm the Script Property named in column C has a URL. Column D should become checked after a post or reminder run.
 3. **Executions** in the Apps Script editor shows the trigger run. A webhook HTTP error is thrown as `Google Chat webhook failed (HTTP ...)`. The URL is not included in that message.
 4. If the trigger never ran, open Schedules and run menu 14. Check that the authorizing user still has access to the spreadsheet.
-5. For a missing Monday summary, check whether **Weekly Space Summaries** already has a row for that week and space, and whether `OPENROUTER_ENABLED` is `0`.
+5. For a missing Monday summary, check whether **Weekly Space Summaries** already has a row for that week and space, and whether `OPENROUTER_ENABLED` is `0`. An empty summary sheet after a completed Monday run means every model failed and Chat got the member text.
+6. If the weekday daily post is missing and Executions shows `We're sorry, a server error occurred` after several minutes, the run died while re-reading member sheets. The current daily post reads each member sheet once.

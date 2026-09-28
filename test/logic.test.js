@@ -188,4 +188,32 @@ assert.strictEqual(
   'meta-llama/llama-3.3-70b-instruct:free|deepseek/deepseek-v4-flash:free'
 );
 
+const fallbackModels = 'google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free';
+assert.strictEqual(
+  Logic.resolveOpenRouterModels(
+    'meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-v4-flash:free',
+    fallbackModels
+  ).join('|'),
+  'google/gemma-4-31b-it:free|qwen/qwen3.8-27b:free|openrouter/free'
+);
+assert.strictEqual(
+  Logic.resolveOpenRouterModels(
+    'google/gemma-4-26b-a4b-it:free, meta-llama/llama-3.3-70b-instruct',
+    fallbackModels
+  ).join('|'),
+  'google/gemma-4-26b-a4b-it:free|openrouter/free'
+);
+assert.strictEqual(
+  Logic.resolveOpenRouterModels('openrouter/free', fallbackModels).join('|'),
+  'openrouter/free'
+);
+assert.strictEqual(Logic.isFreeOpenRouterModel('meta-llama/llama-3.3-70b-instruct'), false);
+assert.strictEqual(Logic.isFreeOpenRouterModel('deepseek/deepseek-v4-flash:free'), false);
+assert.strictEqual(Logic.isFreeOpenRouterModel('openrouter/free'), true);
+const body = Logic.openRouterChatBody('google/gemma-4-31b-it:free', 'system', 'user');
+assert.strictEqual(body.model, 'google/gemma-4-31b-it:free');
+assert.strictEqual(body.reasoning.effort, 'none');
+assert.strictEqual(body.max_tokens, 700);
+assert.strictEqual(body.messages[1].content, 'user');
+
 console.log('logic.test.js passed');
