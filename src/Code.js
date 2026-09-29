@@ -12,7 +12,7 @@
  *
  * Chat column: <users/USER_ID> to ping that person. Blank shows *Name*.
  * Spaces column: multi-select chip dropdown from Chat Spaces!A2:A.
- * Menu 16 applies selected spaces to the Reminder Matrix.
+ * Menu "Apply Team spaces to reminder matrix" applies column E to the matrix.
  * Monday weekly posts may send an OpenRouter summary-only message per
  * configured webhook space when OPENROUTER_API_KEY is set. Failures fall
  * back to the member detail text. Default models:
@@ -92,39 +92,35 @@ const HEADER_NOTES = {
 
 function onOpen() {
   const menu = SpreadsheetApp.getUi().createMenu('Daily Progress')
-    .addItem('1) Add or update member', 'addOrUpdateMember')
-    .addItem('2) Sync member sheets', 'syncMemberSheets')
-    .addItem('3) Ensure Team headers', 'setupBaseSheets')
-    .addItem('4) Provision roster, spaces, and sheets', 'provisionRosterFromMenu')
+    .addItem('Add or update member', 'addOrUpdateMember')
+    .addItem('Sync member sheets', 'syncMemberSheets')
+    .addItem('Bootstrap roster, spaces & sheets', 'provisionRosterFromMenu')
     .addSeparator()
-    .addItem('5) Set Google Chat webhook URL', 'setGoogleChatWebhookUrl')
-    .addItem('6) Test Google Chat webhook', 'testGoogleChatWebhook')
-    .addItem('7) Post today to configured spaces', 'postDailyUpdatesToChat')
-    .addItem('8) Send reminders now', 'sendReminderNow')
-    .addItem('9) Run weekly roll-up now', 'runWeeklyRollupNow')
-    .addItem('10) Sync reminder matrix', 'syncReminderMatrixFromMenu')
+    .addItem('Set Chat webhook…', 'setGoogleChatWebhookForSpace')
+    .addItem('Test Chat webhooks', 'testAllGoogleChatWebhooks')
+    .addItem('Post today’s updates now', 'postDailyUpdatesToChat')
+    .addItem('Send reminders now', 'sendReminderNow')
+    .addItem('Run weekly roll-up now', 'runWeeklyRollupNow')
     .addSeparator()
-    .addItem('11) Set reminder schedule', 'setReminderSchedule')
-    .addItem('12) Set daily post schedule', 'setDailyPostSchedule')
-    .addItem('13) Set weekly roll-up schedule', 'setWeeklyRollupSchedule')
-    .addItem('14) Apply schedules', 'applySchedulesFromMenu')
-    .addItem('15) Remove daily Slack post trigger', 'removeDailyTriggers')
+    .addItem('Sync reminder matrix', 'syncReminderMatrixFromMenu')
+    .addItem('Apply Team spaces to reminder matrix', 'refreshSpaceAccess')
     .addSeparator()
-    .addItem('16) Apply Team spaces to reminder matrix', 'refreshSpaceAccess')
-    .addItem('17) Set space access schedule', 'setSpaceAccessSchedule')
-    .addItem('18) Set OpenRouter API key', 'setOpenRouterApiKey');
+    .addItem('Apply schedules from sheet', 'applySchedulesFromMenu')
+    .addItem('Set OpenRouter API key', 'setOpenRouterApiKey');
   if (SLACK_ENABLED) {
     menu.addSeparator()
       .addItem('Set Slack webhook URL', 'setSlackWebhookUrl')
       .addItem('Test Slack webhook', 'testSlackWebhook')
       .addItem('Install daily 8:30 PM IST Slack post', 'installDailyTrigger_2030IST')
-      .addItem('Post today’s Slack summary now', 'postTodaysSummary');
+      .addItem('Post today’s Slack summary now', 'postTodaysSummary')
+      .addItem('Remove daily Slack post trigger', 'removeDailyTriggers');
   }
   menu.addToUi();
 }
 
 /* -------------------- Setup -------------------- */
 
+/** Ensures Team / Schedules / Reminder Matrix exist. Prefer Bootstrap from the menu. */
 function setupBaseSheets() {
   const team = ensureTeamSheet_();
   const existing = readTeamRows_(team);
@@ -135,13 +131,13 @@ function setupBaseSheets() {
       'jane@example.com',
       '<users/123456789>'
     ]]);
-    SpreadsheetApp.getUi().alert('Team sheet created with one example row. Replace it with Add or update member, then Sync member sheets.');
-  } else {
-    SpreadsheetApp.getUi().alert('Team headers are in place. Existing members were kept.');
   }
   autoResize_(team);
   ensureSchedulesSheet_();
   syncReminderMatrix_();
+  SpreadsheetApp.getUi().alert(existing.length
+    ? 'Team headers, Schedules, and Reminder Matrix are in place. Existing members were kept.'
+    : 'Base sheets created with one example Team row. Use Add or update member, or Bootstrap roster, spaces & sheets.');
 }
 
 function addOrUpdateMember() {
@@ -227,7 +223,10 @@ function provisionRosterFromMenu() {
   const n = readTeamRows_(ensureTeamSheet_()).length;
   const spaces = SpreadsheetApp.getActive().getSheetByName(SHEETS.SPACES);
   const spaceCount = spaces ? Math.max(0, spaces.getLastRow() - 1) : 0;
-  SpreadsheetApp.getUi().alert(`Provisioned ${n} member(s) and ${spaceCount} space(s). Existing rows were not cleared.`);
+  SpreadsheetApp.getUi().alert(
+    'Bootstrap finished: ' + n + ' Team member(s), ' + spaceCount + ' Chat space(s). ' +
+    'Existing rows were kept. Fill Team column E, then run Apply Team spaces to reminder matrix.'
+  );
 }
 
 function provisionRosterSpacesAndSheets() {
@@ -493,12 +492,17 @@ function installOperationalTriggers_() {
 function applySchedulesFromMenu() {
   installSchedulesFromSheet_();
   const lines = readSchedules_(SpreadsheetApp.getActive()).map(row => {
-    if (!row.enabled) return row.job + ': off';
+    if (!row.enabled) return row.job + ': disabled (edit the Schedules sheet to enable)';
     const check = Logic.validateSchedule(row.days, row.hour, row.minute);
     if (!check.ok) return row.job + ': not installed. ' + check.error;
-    return row.job + ': ' + row.days + ' at ' + row.hour + ':' + String(row.minute).padStart(2, '0');
+    return row.job + ': ' + row.days + ' at ' +
+      Logic.formatClockTime(row.hour, row.minute) + ' IST';
   });
-  SpreadsheetApp.getUi().alert('Schedules applied.\n\n' + lines.join('\n'));
+  SpreadsheetApp.getUi().alert(
+    'Triggers reinstalled from the Schedules sheet.\n' +
+    'Edit that sheet (days / hour / minute / Enabled), then run this again.\n\n' +
+    lines.join('\n')
+  );
 }
 
 function promptSchedule_(jobName) {
@@ -712,6 +716,7 @@ function postDailyUpdatesToChat_(opts) {
   });
 
   let posted = 0;
+  const failures = [];
   configured.forEach(space => {
     const blocks = blocksBySpace[space.name];
     if (!blocks || !blocks.length) return;
@@ -720,10 +725,13 @@ function postDailyUpdatesToChat_(opts) {
       sendToChat_(space.webhook, text);
       posted++;
     } catch (e) {
-      console.error('Daily post failed for ' + space.name + ': ' + ((e && e.message) ? e.message : e));
+      const message = (e && e.message) ? e.message : String(e);
+      failures.push({ name: space.name, error: message });
+      console.error('Daily post failed for ' + space.name + ': ' + message);
       if (!silent) throw e;
     }
   });
+  noteWebhookFailures_('Daily post', failures);
 
   if (!silent) {
     SpreadsheetApp.getUi().alert(posted
@@ -778,41 +786,123 @@ function sendToSlack_(webhook, text) {
 
 /* -------------------- Google Chat webhook -------------------- */
 
+/** @deprecated Use setGoogleChatWebhookForSpace from the menu. Kept for older triggers/docs. */
 function setGoogleChatWebhookUrl() {
+  setGoogleChatWebhookForSpace();
+}
+
+function setGoogleChatWebhookForSpace() {
   const ui = SpreadsheetApp.getUi();
-  const resp = ui.prompt(
-    'Google Chat webhook URL',
-    'In the team space: Apps & integrations → Add webhooks → copy the link. It looks like https://chat.googleapis.com/v1/spaces/.../messages?key=...&token=...',
+  const ss = SpreadsheetApp.getActive();
+  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  const spaces = ss.getSheetByName(SHEETS.SPACES);
+  if (!spaces || spaces.getLastRow() < 2) {
+    ui.alert('Chat Spaces sheet is missing.');
+    return;
+  }
+  const rows = spaces.getRange(2, 1, spaces.getLastRow() - 1, 3).getValues()
+    .map(r => ({
+      name: String(r[0] || '').trim(),
+      spaceId: String(r[1] || '').trim(),
+      prop: String(r[2] || '').trim()
+    }))
+    .filter(r => r.name && r.prop);
+  if (!rows.length) {
+    ui.alert('No Chat Spaces rows with a webhook property name.');
+    return;
+  }
+  const nameResp = ui.prompt(
+    'Chat space name',
+    'Exact name from Chat Spaces column A. Examples: ' + rows.slice(0, 3).map(r => r.name).join(', '),
     ui.ButtonSet.OK_CANCEL
   );
-  if (resp.getSelectedButton() !== ui.Button.OK) return;
-  const url = (resp.getResponseText() || '').trim();
+  if (nameResp.getSelectedButton() !== ui.Button.OK) return;
+  const spaceName = String(nameResp.getResponseText() || '').trim();
+  const row = rows.find(r => r.name === spaceName);
+  if (!row) {
+    ui.alert('No Chat Spaces row named "' + spaceName + '". Use the exact column A value.');
+    return;
+  }
+  const urlResp = ui.prompt(
+    'Webhook URL for ' + spaceName,
+    'Open that space → Apps & integrations → Incoming webhooks → copy the URL for property ' + row.prop + '.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (urlResp.getSelectedButton() !== ui.Button.OK) return;
+  const url = normalizeChatWebhookUrl_(urlResp.getResponseText());
   if (!isChatWebhookUrl_(url)) {
     ui.alert('That is not a Google Chat incoming webhook URL.');
     return;
   }
-  PropertiesService.getScriptProperties().setProperty(PROP_KEYS.CHAT_WEBHOOK, url);
-  ui.alert('Saved as GOOGLE_CHAT_WEBHOOK_URL. It is not stored in the script file.');
+  const match = url.match(/\/spaces\/([^/]+)\/messages/i);
+  if (row.spaceId && match && match[1] !== row.spaceId) {
+    ui.alert(
+      'That webhook is for space id ' + match[1] + ', but Chat Spaces lists ' + row.spaceId +
+      ' for ' + spaceName + '. Recreate the webhook in the correct space.'
+    );
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty(row.prop, url);
+  readConfiguredSpaces_(ss);
+  ui.alert('Saved webhook for ' + spaceName + ' as Script Property ' + row.prop + '.');
 }
 
+/** @deprecated Use testAllGoogleChatWebhooks from the menu. */
 function testGoogleChatWebhook() {
+  testAllGoogleChatWebhooks();
+}
+
+function testAllGoogleChatWebhooks() {
   const ui = SpreadsheetApp.getUi();
-  const webhook = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.CHAT_WEBHOOK);
-  if (!webhook) { ui.alert('Set the Google Chat webhook URL first.'); return; }
-  const now = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm z');
-  try {
-    sendToChat_(webhook, `*Daily Progress test*\nTime: ${now}\nMentions use <users/USER_ID> from the Team sheet Chat column.`);
-    ui.alert('Test sent. Check the Google Chat space.');
-  } catch (e) {
-    ui.alert((e && e.message) ? e.message : String(e));
+  const ss = SpreadsheetApp.getActive();
+  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  const spaces = ss.getSheetByName(SHEETS.SPACES);
+  if (!spaces || spaces.getLastRow() < 2) {
+    ui.alert('Chat Spaces sheet is missing.');
+    return;
   }
+  const props = PropertiesService.getScriptProperties();
+  const rows = spaces.getRange(2, 1, spaces.getLastRow() - 1, 3).getValues();
+  const now = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm z');
+  const ok = [];
+  const bad = [];
+  rows.forEach(r => {
+    const name = String(r[0] || '').trim();
+    const prop = String(r[2] || '').trim();
+    if (!name || !prop) return;
+    const webhook = props.getProperty(prop);
+    if (!webhook) {
+      bad.push(name + ' (missing property ' + prop + ')');
+      return;
+    }
+    try {
+      sendToChat_(webhook, '*Daily Progress webhook test*\nSpace: ' + name + '\nTime: ' + now);
+      ok.push(name);
+    } catch (e) {
+      const message = (e && e.message) ? e.message : String(e);
+      bad.push(name + ' — ' + message);
+      console.error('Webhook test failed for ' + name + ': ' + message);
+    }
+  });
+  readConfiguredSpaces_(ss);
+  ui.alert(
+    (ok.length ? ('OK (' + ok.length + '): ' + ok.join(', ') + '\n\n') : '') +
+    (bad.length ? ('Failed (' + bad.length + '): ' + bad.join('\n')) : 'All listed webhooks responded.')
+  );
 }
 
 function sendToChat_(webhook, text) {
-  if (!webhook) throw new Error('Google Chat webhook URL is not set.');
+  const url = normalizeChatWebhookUrl_(webhook);
+  if (!url) throw new Error('Google Chat webhook URL is not set.');
+  if (!isChatWebhookUrl_(url)) {
+    throw new Error(
+      'Google Chat webhook URL is invalid (missing key/token, or HTML-escaped &amp;). ' +
+      'Re-save the Script Property with a normal & between query params.'
+    );
+  }
   const chunks = chunkChatText_(text, 3500);
   chunks.forEach(part => {
-    const res = UrlFetchApp.fetch(webhook, {
+    const res = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json; charset=UTF-8',
       payload: JSON.stringify({ text: part }),
@@ -820,9 +910,27 @@ function sendToChat_(webhook, text) {
     });
     const code = res.getResponseCode();
     if (code < 200 || code >= 300) {
-      throw new Error(`Google Chat webhook failed (HTTP ${code}). Check the webhook in the space.`);
+      const body = String(res.getContentText() || '').slice(0, 180);
+      throw new Error(
+        'Google Chat webhook failed (HTTP ' + code + '). ' +
+        'Re-copy the incoming webhook URL into the Script Property for this space. ' +
+        body
+      );
     }
   });
+}
+
+function dailyPostTimeLabel_() {
+  const row = readSchedules_(SpreadsheetApp.getActive()).find(item => item.job === 'Daily post');
+  if (!row || !row.enabled) return '';
+  const clock = Logic.formatClockTime(row.hour, row.minute);
+  return clock ? (clock + ' IST') : '';
+}
+
+function noteWebhookFailures_(jobLabel, failures) {
+  if (!failures || !failures.length) return;
+  const detail = failures.map(f => f.name + ': ' + f.error).join(' | ');
+  console.error(jobLabel + ' webhook failures: ' + detail);
 }
 
 function isChatWebhookUrl_(url) {
@@ -987,6 +1095,7 @@ function sendReminder_(opts) {
   const todayStr = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   const dateLabel = Utilities.formatDate(new Date(), TZ, 'EEE, MMM d, yyyy');
   const sheetUrl = ss.getUrl();
+  const dailyPostTime = dailyPostTimeLabel_();
   const members = readTeamRows_(team);
   const spaces = readConfiguredSpaces_(ss);
   const missingBySpace = {};
@@ -1006,17 +1115,20 @@ function sendReminder_(opts) {
   });
 
   const posted = [];
+  const failures = [];
   Object.keys(missingBySpace).forEach(spaceName => {
     const item = missingBySpace[spaceName];
     try {
-      sendToChat_(item.webhook, Logic.reminderText(spaceName, dateLabel, item.labels, sheetUrl));
+      sendToChat_(item.webhook, Logic.reminderText(spaceName, dateLabel, item.labels, sheetUrl, dailyPostTime));
       posted.push(spaceName);
     } catch (err) {
       const message = (err && err.message) ? err.message : String(err);
+      failures.push({ name: spaceName, error: message });
       if (!silent) SpreadsheetApp.getUi().alert(spaceName + ': ' + message);
       else console.error(spaceName, err);
     }
   });
+  noteWebhookFailures_('Reminder', failures);
 
   Object.keys(missingByMember).forEach(name => {
     const person = missingByMember[name];
@@ -1025,10 +1137,7 @@ function sendReminder_(opts) {
       MailApp.sendEmail({
         to: person.email,
         subject: 'Reminder: Update daily progress — ' + todayStr,
-        htmlBody:
-          'Hi ' + person.name + ',<br><br>' +
-          'Please add today\'s progress for: <b>' + person.spaces.join(', ') + '</b>.<br><br>' +
-          '<a href="' + sheetUrl + '">Open the workbook</a>'
+        htmlBody: Logic.reminderEmailHtml(person.name, person.spaces, sheetUrl, dailyPostTime)
       });
     } catch (err) {
       console.error(err);
@@ -1144,6 +1253,7 @@ function weeklyCollatePreviousWeek_(opts) {
   let posted = 0;
   let summarized = 0;
   const skipped = [];
+  const failures = [];
   spaceNames.forEach((spaceName, spaceIndex) => {
     const webhook = configured[spaceName];
     if (!webhook) { skipped.push(spaceName); return; }
@@ -1171,10 +1281,13 @@ function weeklyCollatePreviousWeek_(opts) {
       sendToChat_(webhook, message);
       posted++;
     } catch (e) {
+      const errMsg = (e && e.message) ? e.message : String(e);
       skipped.push(spaceName);
-      console.error('Weekly post failed for ' + spaceName + ': ' + ((e && e.message) ? e.message : e));
+      failures.push({ name: spaceName, error: errMsg });
+      console.error('Weekly post failed for ' + spaceName + ': ' + errMsg);
     }
   });
+  noteWebhookFailures_('Weekly roll-up', failures);
 
   if (!silent) {
     const skipNote = skipped.length ? ` Not posted (no webhook / failed): ${skipped.join(', ')}.` : '';
@@ -1373,13 +1486,17 @@ function readConfiguredSpaces_(ss) {
   rows.forEach(r => {
     const name = (r[0] || '').toString().trim();
     const prop = (r[2] || '').toString().trim();
-    const webhook = prop ? props.getProperty(prop) : '';
-    const on = !!(name && prop && webhook);
+    const webhook = prop ? normalizeChatWebhookUrl_(props.getProperty(prop)) : '';
+    const on = !!(name && prop && webhook && isChatWebhookUrl_(webhook));
     flags.push([on]);
     if (on) out.push({ name, prop, webhook });
   });
   sh.getRange(2, 4, n, 1).setValues(flags);
   return out;
+}
+
+function normalizeChatWebhookUrl_(url) {
+  return String(url || '').trim().replace(/&amp;/gi, '&');
 }
 
 /* -------------------- Weekly date helpers -------------------- */

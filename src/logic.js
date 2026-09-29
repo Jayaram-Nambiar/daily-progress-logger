@@ -1,7 +1,7 @@
 var Logic = {
   WEEKDAYS: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
   MINUTES: [0, 15, 30, 45],
-  DEFAULT_SPACE: 'TEAM_ALPHA',
+  DEFAULT_SPACE: 'PRJ_VOX',
 
   pad_: function (n) { return String(n).padStart(2, '0'); },
 
@@ -69,16 +69,42 @@ var Logic = {
     });
   },
 
-  reminderText: function (spaceName, dateLabel, labels, sheetUrl) {
+  formatClockTime: function (hour, minute) {
+    var h = Number(hour);
+    var m = Number(minute);
+    if (!isFinite(h) || h < 0 || h > 23) return '';
+    if (!isFinite(m) || m < 0 || m > 59) m = 0;
+    var hh = h < 10 ? '0' + h : String(h);
+    var mm = m < 10 ? '0' + m : String(m);
+    return hh + ':' + mm;
+  },
+
+  reminderText: function (spaceName, dateLabel, labels, sheetUrl, dailyPostTimeLabel) {
     var lines = [
       '*Gentle reminder — please add your daily progress for ' + dateLabel + '*',
-      'Space: ' + spaceName,
-      'Workbook: ' + sheetUrl,
-      ''
+      'Space: ' + spaceName
     ];
+    var postAt = String(dailyPostTimeLabel || '').trim();
+    if (postAt) {
+      lines.push('Automated daily progress posts to this space around ' + postAt + '.');
+    }
+    lines.push('Workbook: ' + sheetUrl);
+    lines.push('');
     labels.forEach(function (label) { lines.push('• ' + label); });
     lines.push('');
     return lines.join('\n');
+  },
+
+  reminderEmailHtml: function (name, spaces, sheetUrl, dailyPostTimeLabel) {
+    var postAt = String(dailyPostTimeLabel || '').trim();
+    var when = postAt
+      ? ' Automated daily progress posts go out around <b>' + postAt + '</b>.'
+      : '';
+    return (
+      'Hi ' + name + ',<br><br>' +
+      'Please add today\'s progress for: <b>' + (spaces || []).join(', ') + '</b>.' + when + '<br><br>' +
+      '<a href="' + sheetUrl + '">Open the workbook</a>'
+    );
   },
 
   needsSpacePrompt: function (editedCols, spaceCol, dateYmd, todayYmd, spaceValue, validSpaces) {

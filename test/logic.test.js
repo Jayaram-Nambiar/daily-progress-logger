@@ -30,31 +30,38 @@ assert.strictEqual(Logic.validateSchedule('Mon', 24, 0).ok, false);
 assert.strictEqual(Logic.validateSchedule('', 18, 0).ok, false);
 
 assert.strictEqual(Logic.hasUpdateForSpace([
-  { date: '2026-09-25', summary: 'Did the lab notes', space: 'TEAM_ALPHA' }
-], '2026-09-25', 'TEAM_ALPHA'), true);
+  { date: '2026-09-25', summary: 'Did the lab notes', space: 'PRJ_VOX' }
+], '2026-09-25', 'PRJ_VOX'), true);
 assert.strictEqual(Logic.hasUpdateForSpace([
-  { date: '2026-09-25', summary: 'Did the lab notes', space: 'TEAM_ALPHA' }
+  { date: '2026-09-25', summary: 'Did the lab notes', space: 'PRJ_VOX' }
 ], '2026-09-25', 'LAB_STATUS_NOTICE'), false);
 assert.strictEqual(Logic.hasUpdateForSpace([
-  { date: '2026-09-25', summary: '', space: 'TEAM_ALPHA' }
-], '2026-09-25', 'TEAM_ALPHA'), false);
+  { date: '2026-09-25', summary: '', space: 'PRJ_VOX' }
+], '2026-09-25', 'PRJ_VOX'), false);
 assert.strictEqual(Logic.hasUpdateForSpace([
-  { date: '2026-09-24', summary: 'Yesterday', space: 'TEAM_ALPHA' }
-], '2026-09-25', 'TEAM_ALPHA'), false);
+  { date: '2026-09-24', summary: 'Yesterday', space: 'PRJ_VOX' }
+], '2026-09-25', 'PRJ_VOX'), false);
 
-const text = Logic.reminderText('TEAM_ALPHA', 'Fri, Sep 25, 2026', ['<users/1>', '*Ada*'], 'https://docs.google.com/spreadsheets/d/SHEET');
-assert.ok(text.indexOf('Space: TEAM_ALPHA') >= 0);
+const text = Logic.reminderText('PRJ_VOX', 'Fri, Sep 25, 2026', ['<users/1>', '*Ada*'], 'https://docs.google.com/spreadsheets/d/SHEET', '19:00 IST');
+assert.ok(text.indexOf('Space: PRJ_VOX') >= 0);
 assert.ok(text.indexOf('https://docs.google.com/spreadsheets/d/SHEET') >= 0);
 assert.ok(text.indexOf('• <users/1>') >= 0);
 assert.ok(text.indexOf('• *Ada*') >= 0);
+assert.ok(text.indexOf('around 19:00 IST') >= 0);
+assert.strictEqual(Logic.formatClockTime(19, 0), '19:00');
+assert.strictEqual(Logic.formatClockTime(9, 5), '09:05');
+const mail = Logic.reminderEmailHtml('Ada', ['PRJ_VOX', 'HAK_HEALTH_A_THON'], 'https://docs.google.com/spreadsheets/d/SHEET', '19:00 IST');
+assert.ok(mail.indexOf('PRJ_VOX, HAK_HEALTH_A_THON') >= 0);
+assert.ok(mail.indexOf('around <b>19:00 IST</b>') >= 0);
+assert.ok(mail.indexOf('https://docs.google.com/spreadsheets/d/SHEET') >= 0);
 
 const seeded = Logic.seedMatrix(
   ['Ada', 'Bea'],
-  ['TEAM_ALPHA', 'TEAM_BETA'],
+  ['PRJ_VOX', 'PRJ_AURA'],
   {},
   { Ada: true, Bea: false }
 );
-assert.strictEqual(Array.from(seeded.headers).join('|'), 'Member|TEAM_ALPHA|TEAM_BETA');
+assert.strictEqual(Array.from(seeded.headers).join('|'), 'Member|PRJ_VOX|PRJ_AURA');
 assert.strictEqual(JSON.stringify(seeded.grid), JSON.stringify([
   ['Ada', true, false],
   ['Bea', false, false]
@@ -62,16 +69,16 @@ assert.strictEqual(JSON.stringify(seeded.grid), JSON.stringify([
 
 const kept = Logic.seedMatrix(
   ['Ada'],
-  ['TEAM_ALPHA', 'TEAM_BETA'],
-  { Ada: { TEAM_BETA: true } },
+  ['PRJ_VOX', 'PRJ_AURA'],
+  { Ada: { PRJ_AURA: true } },
   { Ada: true }
 );
 assert.strictEqual(JSON.stringify(kept.grid), JSON.stringify([['Ada', false, true]]));
 
 const addedSpace = Logic.seedMatrix(
   ['Ada', 'Cy'],
-  ['TEAM_ALPHA', 'TEAM_BETA'],
-  { Ada: { TEAM_ALPHA: true } },
+  ['PRJ_VOX', 'PRJ_AURA'],
+  { Ada: { PRJ_VOX: true } },
   { Cy: true }
 );
 assert.strictEqual(JSON.stringify(addedSpace.grid), JSON.stringify([
@@ -79,34 +86,34 @@ assert.strictEqual(JSON.stringify(addedSpace.grid), JSON.stringify([
   ['Cy', false, false]
 ]));
 
-const spaces = ['TEAM_ALPHA', 'TEAM_BETA'];
+const spaces = ['PRJ_VOX', 'PRJ_AURA'];
 const spaceCol = 5;
 assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-25', '2026-09-25', '', spaces), true);
 assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-25', '2026-09-25', 'Not A Space', spaces), true);
-assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-25', '2026-09-25', 'TEAM_ALPHA', spaces), false);
+assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-25', '2026-09-25', 'PRJ_VOX', spaces), false);
 assert.strictEqual(Logic.needsSpacePrompt([5], spaceCol, '2026-09-25', '2026-09-25', '', spaces), false);
-assert.strictEqual(Logic.needsSpacePrompt([1, 5], spaceCol, '2026-09-25', '2026-09-25', 'TEAM_BETA', spaces), false);
+assert.strictEqual(Logic.needsSpacePrompt([1, 5], spaceCol, '2026-09-25', '2026-09-25', 'PRJ_AURA', spaces), false);
 assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-24', '2026-09-25', '', spaces), false);
 assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '2026-09-26', '2026-09-25', '', spaces), false);
 assert.strictEqual(Logic.needsSpacePrompt([1], spaceCol, '', '2026-09-25', '', spaces), false);
 
-assert.strictEqual(Logic.formatSpaceList(['TEAM_BETA', 'TEAM_ALPHA', 'TEAM_ALPHA']), 'TEAM_ALPHA, TEAM_BETA');
-assert.strictEqual(Logic.parseSpaceList('TEAM_ALPHA, TEAM_BETA').join('|'), 'TEAM_ALPHA|TEAM_BETA');
-assert.strictEqual(Logic.isNamedProjectSpace('SPACE', 'TEAM_ALPHA'), true);
+assert.strictEqual(Logic.formatSpaceList(['PRJ_AURA', 'PRJ_VOX', 'PRJ_VOX']), 'PRJ_AURA, PRJ_VOX');
+assert.strictEqual(Logic.parseSpaceList('PRJ_VOX, PRJ_AURA').join('|'), 'PRJ_VOX|PRJ_AURA');
+assert.strictEqual(Logic.isNamedProjectSpace('SPACE', 'PRJ_VOX'), true);
 assert.strictEqual(Logic.isNamedProjectSpace('SPACE', 'Meeting started'), false);
-assert.strictEqual(Logic.isNamedProjectSpace('GROUP_CHAT', 'TEAM_ALPHA'), false);
+assert.strictEqual(Logic.isNamedProjectSpace('GROUP_CHAT', 'PRJ_VOX'), false);
 assert.strictEqual(Logic.chatUserKey('<users/105>'), 'users/105');
-const access = Logic.spacesForMember('users/105', { TEAM_ALPHA: { 'users/105': true }, TEAM_BETA: {} });
-assert.strictEqual(access.join('|'), 'TEAM_ALPHA');
-const keptGrid = Logic.seedMatrix(['Ada'], ['TEAM_ALPHA', 'TEAM_BETA'], { Ada: { TEAM_ALPHA: true, TEAM_BETA: true } }, {}).grid;
-const limited = Logic.applyMembership(keptGrid, ['TEAM_ALPHA', 'TEAM_BETA'], { Ada: ['TEAM_ALPHA'] }, true);
+const access = Logic.spacesForMember('users/105', { PRJ_VOX: { 'users/105': true }, PRJ_AURA: {} });
+assert.strictEqual(access.join('|'), 'PRJ_VOX');
+const keptGrid = Logic.seedMatrix(['Ada'], ['PRJ_VOX', 'PRJ_AURA'], { Ada: { PRJ_VOX: true, PRJ_AURA: true } }, {}).grid;
+const limited = Logic.applyMembership(keptGrid, ['PRJ_VOX', 'PRJ_AURA'], { Ada: ['PRJ_VOX'] }, true);
 assert.strictEqual(JSON.stringify(limited), JSON.stringify([['Ada', true, '']]));
-const untouched = Logic.applyMembership(keptGrid, ['TEAM_ALPHA', 'TEAM_BETA'], { Ada: [] }, false);
+const untouched = Logic.applyMembership(keptGrid, ['PRJ_VOX', 'PRJ_AURA'], { Ada: [] }, false);
 assert.strictEqual(JSON.stringify(untouched), JSON.stringify([['Ada', true, true]]));
 
 assert.strictEqual(Logic.truncateText('abcdef', 10), 'abcdef');
 assert.ok(Logic.truncateText('abcdefghijklmnop', 12).indexOf('…[truncated]') >= 0);
-const prompt = Logic.buildWeeklySummaryUserPrompt('TEAM_ALPHA', '2026-09-14', '2026-09-20', [
+const prompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-09-14', '2026-09-20', [
   {
     label: '*Ada*',
     text: '• Wed, Sep 16: followed up\n• Mon, Sep 14: shipped login',
@@ -116,7 +123,7 @@ const prompt = Logic.buildWeeklySummaryUserPrompt('TEAM_ALPHA', '2026-09-14', '2
     ]
   }
 ]);
-assert.ok(prompt.indexOf('Space: TEAM_ALPHA') >= 0);
+assert.ok(prompt.indexOf('Space: PRJ_VOX') >= 0);
 assert.ok(prompt.indexOf('shipped login') >= 0);
 assert.ok(prompt.indexOf('[2026-09-14]') >= 0);
 assert.ok(prompt.indexOf('[2026-09-16]') >= 0);
@@ -138,7 +145,7 @@ assert.strictEqual(
   true
 );
 assert.strictEqual(Logic.hasWeeklyMemberContent([{ label: '*Ada*', text: '• shipped' }]), true);
-const promptFallback = Logic.buildWeeklySummaryUserPrompt('TEAM_ALPHA', '2026-09-14', '2026-09-20', [
+const promptFallback = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-09-14', '2026-09-20', [
   { label: '*Ada*', text: '• Mon: shipped login' }
 ]);
 assert.ok(promptFallback.indexOf('shipped login') >= 0);
@@ -148,7 +155,7 @@ assert.strictEqual(
 );
 assert.strictEqual(Logic.sanitizeWeeklySummary(''), '');
 const chat = Logic.buildWeeklyChatMessage(
-  'TEAM_ALPHA',
+  'PRJ_VOX',
   '2026-09-14',
   '2026-09-20',
   '• Login shipped',
@@ -158,7 +165,7 @@ assert.ok(chat.indexOf('• Login shipped') >= 0);
 assert.ok(chat.indexOf('*By member*') < 0);
 assert.ok(chat.indexOf('*Ada*') < 0);
 const chatNoAi = Logic.buildWeeklyChatMessage(
-  'TEAM_ALPHA',
+  'PRJ_VOX',
   '2026-09-14',
   '2026-09-20',
   '',

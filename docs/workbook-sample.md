@@ -2,7 +2,7 @@
 
 This is a **fictional** picture of the workbook the script expects. Headers match `src/Code.js`. Every name, email, Slack id, Chat user id, space id, summary, and checkbox below is invented. None of it is copied from a live spreadsheet.
 
-The same rows are in [workbook-sample.xlsx](workbook-sample.xlsx). `npm install` does not create a Google Sheet and does not upload this file. The script builds an empty workbook of the same shape when you run menu **4** on a blank Sheet. Open the `.xlsx` when you want to see the tabs, including the example log rows and weekly tables that menu 4 does not invent.
+The same rows are in [workbook-sample.xlsx](workbook-sample.xlsx). `npm install` does not create a Google Sheet and does not upload this file. The script builds an empty workbook of the same shape when you run menu **Bootstrap roster, spaces & sheets** on a blank Sheet. Open the `.xlsx` when you want to see the tabs, including the example log rows and weekly tables that menu 4 does not invent.
 
 Uploading it is optional. To look at it as a Google Sheet in your own account:
 
@@ -14,7 +14,7 @@ Then bind Apps Script to that Sheet and continue at [runbook step 2](runbook.md)
 What the conversion does not keep:
 
 - Team column E is comma-separated text. Google Sheets multi-select chips cannot be stored in Excel. Create that dropdown once in the Sheets UI, as the runbook describes.
-- Checkboxes may arrive as `TRUE` / `FALSE` text. Click them so they are real checkboxes before you run menu **14** or rely on reminders. **Configured** is false in the sample until a Script Property has a URL.
+- Checkboxes may arrive as `TRUE` / `FALSE` text. Click them so they are real checkboxes before you run **Apply schedules from sheet** or rely on reminders. **Configured** is false in the sample until a Script Property has a URL.
 - Space access is off in the sample. A blank Sheet that the script creates will insert that job as enabled. Uncheck it there too unless you want the weekday reapply.
 
 Personal tabs use the member's name as the sheet name (`Alex Rivera`, `Sam Chen`, `Jordan Patel`).
@@ -58,7 +58,7 @@ A checked cell means "remind this person in this space." After menu 16, a space 
 | Weekly roll-up | TRUE | Mon | 9 | 0 |
 | Space access | FALSE | Mon,Tue,Wed,Thu,Fri | 8 | 0 |
 
-The script writes Space access as enabled when that row is missing. Uncheck it and run **14) Apply schedules** unless you want the weekday reapply job. Times are in the script timezone (`Asia/Kolkata` unless you change it).
+The script writes Space access as enabled when that row is missing. Uncheck it and run **Apply schedules from sheet** unless you want the weekday reapply job. Times are in the script timezone (`Asia/Kolkata` unless you change it).
 
 ## Personal tab — Alex Rivera
 

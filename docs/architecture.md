@@ -152,7 +152,7 @@ flowchart LR
 
 - It does not read Chat membership. `writeMemberSpaceColumn_` is unused. Column E is the membership list.
 - It does not post to Slack while `SLACK_ENABLED` is false. The weekend check in the Slack path does not apply to Chat jobs. Chat jobs follow the days on the Schedules sheet.
-- It does not install triggers when someone edits the Schedules sheet. Menu **14) Apply schedules** deletes and recreates the operational triggers.
+- It does not install triggers when someone edits the Schedules sheet. Menu **Apply schedules from sheet** deletes and recreates the operational triggers.
 - The first time the Schedules sheet is created, **Space access** is inserted as enabled. That job only reapplies column E. Uncheck it and apply schedules unless that reapply is wanted.
 
 ## Code map

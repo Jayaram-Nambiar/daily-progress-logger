@@ -4,6 +4,28 @@ Operational steps for a new spreadsheet. Each step says what to do, why that ord
 
 Architecture: [architecture.md](architecture.md). Sample workbook: [workbook-sample.md](workbook-sample.md) and [workbook-sample.xlsx](workbook-sample.xlsx).
 
+## Daily Progress menu
+
+Reload the spreadsheet after `clasp push` so `onOpen` rebuilds the menu.
+
+| Menu item | What it does |
+|---|---|
+| Add or update member | Prompt-driven Team upsert + personal sheet sync |
+| Sync member sheets | Ensure personal tabs / headers / Space dropdown |
+| Bootstrap roster, spaces & sheets | Example roster merge, Chat Spaces, mentions, matrix, schedules, member tabs |
+| Set Chat webhook… | Prompt for Chat Spaces name + URL; writes that row’s Script Property |
+| Test Chat webhooks | One test post per Chat Spaces row with a webhook property |
+| Post today’s updates now | Immediate daily post |
+| Send reminders now | Immediate reminders (Chat + email include the Schedules **Daily post** time) |
+| Run weekly roll-up now | Immediate weekly collate + Chat posts |
+| Sync reminder matrix | Add/drop people and spaces; keep checks |
+| Apply Team spaces to reminder matrix | Team column E → matrix |
+| Apply schedules from sheet | Reinstall triggers from the **Schedules** sheet |
+| Set OpenRouter API key | Save/clear key; write free-tier model list |
+
+Per-job schedule prompts and Slack-only cleanup items are no longer on the default menu. Edit the **Schedules** sheet, then run **Apply schedules from sheet**. Slack items appear only when `SLACK_ENABLED` is true.
+
+
 ## Current application
 
 This runbook matches version 1.0.0 of the template.
@@ -93,7 +115,7 @@ Use your own names, emails, space ids, and numeric Chat user ids. Keep every web
 
 If the primary space is not named `TEAM_ALPHA`, also change `Logic.DEFAULT_SPACE` in `src/logic.js`. That string is used only when an old Remind column is migrated onto the matrix.
 
-**Why.** Menu **4) Provision roster, spaces, and sheets** appends any email in `EXAMPLE_ROSTER` that is not already on Team, ensures Chat Spaces rows, fills a blank Chat cell from `EXAMPLE_CHAT_USER_IDS`, rebuilds the matrix, and creates a personal tab per member. It does not clear existing body rows.
+**Why.** Menu **Bootstrap roster, spaces & sheets** appends any email in `EXAMPLE_ROSTER` that is not already on Team, ensures Chat Spaces rows, fills a blank Chat cell from `EXAMPLE_CHAT_USER_IDS`, rebuilds the matrix, and creates a personal tab per member. It does not clear existing body rows.
 
 **Pitfalls**
 
@@ -112,10 +134,10 @@ https://chat.googleapis.com/v1/spaces/SPACE_ID/messages?key=KEY&token=TOKEN
 
 | Space | Property name | Where to save the URL |
 |---|---|---|
-| Primary (`TEAM_ALPHA` in the sample) | `GOOGLE_CHAT_WEBHOOK_URL` | Menu **5) Set Google Chat webhook URL** |
+| Primary (`TEAM_ALPHA` in the sample) | `GOOGLE_CHAT_WEBHOOK_URL` | Menu **Set Chat webhook…** |
 | Every other space | The name in Chat Spaces column C, for example `GOOGLE_CHAT_WEBHOOK_TEAM_BETA` | Apps Script → Project Settings → Script properties |
 
-Run menu **6) Test Google Chat webhook** for the primary property. Posting to another space is covered when you run menu **7** after someone has a row for that space.
+Run menu **Test Chat webhooks** for the primary property. Posting to another space is covered when you run menu **Post today's updates now** after someone has a row for that space.
 
 **Why.** [ADR-002](decisions/002-script-properties-for-secrets.md). The sheet stores the property name. `readConfiguredSpaces_` sets column D from whether that property has a value, then returns only those spaces.
 
@@ -132,7 +154,7 @@ Run menu **6) Test Google Chat webhook** for the primary property. Posting to an
 
 1. On **Team**, select cell E2. **Data → Data validation → Dropdown**. Use the range `Chat Spaces!A2:A`. Turn on **Allow multiple selections**. That chip control is created in the Sheets UI once.
 2. Pick each person's spaces in column E.
-3. Menu **16) Apply Team spaces to reminder matrix**. Cells for spaces the person is not in become blank.
+3. Menu **Apply Team spaces to reminder matrix**. Cells for spaces the person is not in become blank.
 4. Check the remaining boxes for people who should be reminded.
 
 **Why.** Apps Script cannot create "Allow multiple selections". `applyTeamSpacesDropdown_` only copies the validation that is already on E2. Menu 16 does not call Chat. Column E is the list.
@@ -155,7 +177,7 @@ Run menu **6) Test Google Chat webhook** for the primary property. Posting to an
 | Weekly roll-up | yes | Mon | 9 | 0 |
 | Space access | yes, until you uncheck it | Mon–Fri | 8 | 0 |
 
-Uncheck **Space access** unless you want a weekday job that only reapplies column E. Then run menu **14) Apply schedules**.
+Uncheck **Space access** unless you want a weekday job that only reapplies column E. Then run menu **Apply schedules from sheet**.
 
 **Why.** Editing the sheet does not change triggers. Menu 14 deletes triggers whose handlers are the four jobs (and the old Slack daily handler), then creates triggers for enabled, valid rows. The trigger handler also checks the day at run time.
 
@@ -172,7 +194,7 @@ Uncheck **Space access** unless you want a weekday job that only reapplies colum
 **Do this**
 
 1. Create a key at [openrouter.ai](https://openrouter.ai/).
-2. Menu **18) Set OpenRouter API key**. The key is stored as `OPENROUTER_API_KEY`. The same menu writes the free-tier model list.
+2. Menu **Set OpenRouter API key**. The key is stored as `OPENROUTER_API_KEY`. The same menu writes the free-tier model list.
 3. Default models, in order:
 
 ```text
