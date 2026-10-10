@@ -1,8 +1,8 @@
 {
   "name": "daily-progress-logger",
   "version": "1.0.0",
-  "description": "Spreadsheet-bound Apps Script template that posts daily progress to Google Chat incoming webhooks.",
-  "license": "MIT",
+  "private": true,
+  "description": "Local clasp workspace for the Daily Progress Logger spreadsheet-bound Apps Script.",
   "scripts": {
     "pull": "clasp pull",
     "push": "clasp push",

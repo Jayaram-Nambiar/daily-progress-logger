@@ -127,13 +127,13 @@ assert.ok(prompt.indexOf('Space: PRJ_VOX') >= 0);
 assert.ok(prompt.indexOf('shipped login') >= 0);
 assert.ok(prompt.indexOf('[2026-09-14]') >= 0);
 assert.ok(prompt.indexOf('[2026-09-16]') >= 0);
-assert.ok(prompt.indexOf('chronologically') >= 0);
+assert.ok(prompt.indexOf('member name') >= 0);
 assert.ok(
   prompt.indexOf('[2026-09-14]') < prompt.indexOf('[2026-09-16]'),
   'dated entries should be sorted ascending for chronology'
 );
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('[YYYY-MM-DD]') >= 0);
-assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('chronological') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not invent') >= 0);
 assert.strictEqual(Logic.hasWeeklyMemberContent([]), false);
 assert.strictEqual(Logic.hasWeeklyMemberContent([{ label: '*Ada*', text: '', entries: [] }]), false);
 assert.strictEqual(
@@ -195,13 +195,13 @@ assert.strictEqual(
   'meta-llama/llama-3.3-70b-instruct:free|deepseek/deepseek-v4-flash:free'
 );
 
-const fallbackModels = 'google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free';
+const fallbackModels = 'google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free';
 assert.strictEqual(
   Logic.resolveOpenRouterModels(
     'meta-llama/llama-3.3-70b-instruct:free,deepseek/deepseek-v4-flash:free',
     fallbackModels
   ).join('|'),
-  'google/gemma-4-31b-it:free|qwen/qwen3.8-27b:free|openrouter/free'
+  'google/gemma-4-31b-it:free|google/gemma-4-26b-a4b-it:free|openrouter/free'
 );
 assert.strictEqual(
   Logic.resolveOpenRouterModels(
@@ -222,5 +222,78 @@ assert.strictEqual(body.model, 'google/gemma-4-31b-it:free');
 assert.strictEqual(body.reasoning.effort, 'none');
 assert.strictEqual(body.max_tokens, 700);
 assert.strictEqual(body.messages[1].content, 'user');
+
+const chatWhitespace = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-09-14',
+  '2026-09-20',
+  '   ',
+  [{ label: '*Ada*', text: '• Mon: shipped login' }]
+);
+assert.ok(chatWhitespace.indexOf('*Ada*') >= 0);
+assert.ok(chatWhitespace.indexOf('shipped login') >= 0);
+const chatNull = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-09-14',
+  '2026-09-20',
+  null,
+  [{ label: '*Bea*', text: '• Tue: fixed export' }]
+);
+assert.ok(chatNull.indexOf('*Bea*') >= 0);
+assert.ok(chatNull.indexOf('fixed export') >= 0);
+assert.strictEqual(
+  Logic.extractOpenRouterText({ choices: [{ message: { content: '', reasoning: '• hidden' } }] }),
+  ''
+);
+
+const rosterIds = { 'ada@arcaai.com': '105560557556056333545' };
+const fromMap = Logic.resolveChatMention('Ada@arcaai.com', rosterIds, '');
+assert.strictEqual(fromMap.mention, '<users/105560557556056333545>');
+assert.strictEqual(fromMap.source, 'map');
+const keptMention = Logic.resolveChatMention('new@arcaai.com', rosterIds, '<users/111>');
+assert.strictEqual(keptMention.mention, '<users/111>');
+assert.strictEqual(keptMention.source, 'kept');
+const keptDigits = Logic.resolveChatMention('', rosterIds, '222');
+assert.strictEqual(keptDigits.mention, '<users/222>');
+assert.strictEqual(keptDigits.source, 'kept');
+const missingMention = Logic.resolveChatMention('new@arcaai.com', rosterIds, 'not-an-id');
+assert.strictEqual(missingMention.mention, '');
+assert.strictEqual(missingMention.source, 'missing');
+const mapWins = Logic.resolveChatMention('ada@arcaai.com', rosterIds, '<users/111>');
+assert.strictEqual(mapWins.mention, '<users/105560557556056333545>');
+assert.strictEqual(mapWins.source, 'map');
+
+const namedPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-09-28', '2026-10-04', [
+  {
+    member: 'Ada',
+    label: '<users/105>',
+    entries: [{ ymd: '2026-09-28', line: '• Mon, Sep 28: shipped login <users/999>' }]
+  }
+]);
+assert.ok(namedPrompt.indexOf('Ada') >= 0);
+assert.strictEqual(namedPrompt.indexOf('<users/'), -1);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not restate every daily line') >= 0);
+
+const cleanedSummary = Logic.sanitizeWeeklySummary('• Ada shipped login <users/105>.');
+assert.ok(cleanedSummary.indexOf('Ada shipped login') >= 0);
+assert.strictEqual(cleanedSummary.indexOf('<users/'), -1);
+const safeChat = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-09-14',
+  '2026-09-20',
+  '• Ada <users/105>',
+  [{ label: '<users/105>', text: 'raw line' }]
+);
+assert.strictEqual(safeChat.indexOf('<users/'), -1);
+assert.ok(safeChat.indexOf('raw line') < 0);
+
+assert.strictEqual(Logic.isFreeOpenRouterModel('qwen/qwen3.8-27b:free'), false);
+assert.strictEqual(
+  Logic.resolveOpenRouterModels(
+    'google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free',
+    'google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free'
+  ).join('|'),
+  'google/gemma-4-31b-it:free|openrouter/free'
+);
 
 console.log('logic.test.js passed');

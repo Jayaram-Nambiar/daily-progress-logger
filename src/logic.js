@@ -159,6 +159,25 @@ var Logic = {
     return '';
   },
 
+  /**
+   * Team column D from the email→id map. Map hit wins.
+   * A valid existing mention is kept when the email is absent.
+   * source is 'map', 'kept', or 'missing'.
+   */
+  resolveChatMention: function (email, idMap, existingChat) {
+    var key = String(email || '').trim().toLowerCase();
+    var mapped = String((idMap && key && idMap[key]) || '').trim();
+    if (/^\d+$/.test(mapped)) {
+      return { mention: '<users/' + mapped + '>', source: 'map' };
+    }
+    var userKey = Logic.chatUserKey(existingChat);
+    var digits = userKey.replace(/^users\//i, '');
+    if (/^\d+$/.test(digits)) {
+      return { mention: '<users/' + digits + '>', source: 'kept' };
+    }
+    return { mention: '', source: 'missing' };
+  },
+
   spacesForMember: function (userKey, spaceMembers) {
     if (!userKey) return [];
     var names = [];
@@ -201,13 +220,17 @@ var Logic = {
   MAX_WEEKLY_SUMMARY_CHARS: 1500,
 
   WEEKLY_SUMMARY_SYSTEM:
-    'You summarize team daily-progress updates for a Google Chat space. ' +
-    'Use only the provided text. Do not invent work, people, PRs, dates, or metrics. ' +
-    'Each post is tagged with its calendar date ([YYYY-MM-DD]). Use those dates to build a ' +
-    'chronological picture of what members did over the week (order bullets by date when possible; ' +
-    'mention timing only when the source dates support it). ' +
-    'If the week is sparse, say so briefly. ' +
-    'Output plain text only: 4 to 8 short bullets starting with "• ". No markdown headings.',
+    'You write a short weekly progress summary for one Google Chat space. ' +
+    'Use only the provided text. Do not invent work, people, dates, hours, or blockers. ' +
+    'Each update is tagged [YYYY-MM-DD]. Attribute work to the member name on its heading. ' +
+    'Never output a <users/...> token or a numeric user id. ' +
+    'Do not restate every daily line. Group related work by person into one or two bullets. ' +
+    'Name a blocker only when the source states one. ' +
+    'If the week is sparse, use fewer bullets. ' +
+    'Output plain text only: 3 to 6 bullets starting with "• ". No markdown headings.\n' +
+    'Example input: Ada / [2026-09-14] shipped login / [2026-09-15] fixed export — Blockers: staging.\n' +
+    'Example output:\n' +
+    '• Ada shipped login on 2026-09-14 and fixed export on 2026-09-15. Blocker: staging.',
 
   truncateText: function (text, maxChars) {
     var raw = String(text || '');
@@ -238,6 +261,19 @@ var Logic = {
    * Format one member's dated posts for the LLM. Prefers entries[{ymd,line}] sorted by ymd;
    * falls back to block.text when entries are absent.
    */
+  stripChatMentions_: function (text) {
+    return String(text || '').replace(/<users\/[^>]*>/gi, '');
+  },
+
+  weeklyPromptHeading_: function (block) {
+    var member = Logic.stripChatMentions_(String((block && block.member) || '')).trim();
+    if (member) return member;
+    var label = String((block && block.label) || '').trim();
+    if (/^<users\/[^>]+>$/i.test(label)) return 'Member';
+    var plain = Logic.stripChatMentions_(label.replace(/^\*+|\*+$/g, '')).trim();
+    return plain || 'Member';
+  },
+
   formatMemberUpdatesForPrompt_: function (block) {
     var entries = (block && block.entries) || [];
     if (entries.length) {
@@ -246,12 +282,12 @@ var Logic = {
       });
       return sorted.map(function (entry) {
         var ymd = String((entry && entry.ymd) || '').trim();
-        var line = String((entry && entry.line) || '').trim();
+        var line = Logic.stripChatMentions_(String((entry && entry.line) || '')).trim();
         if (!line) return '';
         return ymd ? ('[' + ymd + '] ' + line) : line;
       }).filter(Boolean).join('\n');
     }
-    return String((block && block.text) || '');
+    return Logic.stripChatMentions_(String((block && block.text) || ''));
   },
 
   buildWeeklySummaryUserPrompt: function (spaceName, weekStartYmd, weekEndYmd, memberBlocks) {
@@ -259,12 +295,12 @@ var Logic = {
       'Space: ' + String(spaceName || '').trim(),
       'Week: ' + String(weekStartYmd || '') + ' to ' + String(weekEndYmd || ''),
       '',
-      'Member updates (each line tagged [YYYY-MM-DD] with the post date). ' +
-        'Summarize chronologically across the week using those dates:',
+      'Member updates. Each line is tagged [YYYY-MM-DD]. ' +
+        'The heading is the member name. Summarize the week from these updates:',
       ''
     ];
     (memberBlocks || []).forEach(function (block) {
-      lines.push(String((block && block.label) || (block && block.member) || 'Member'));
+      lines.push(Logic.weeklyPromptHeading_(block));
       lines.push(Logic.formatMemberUpdatesForPrompt_(block));
       lines.push('');
     });
@@ -288,7 +324,10 @@ var Logic = {
   },
 
   sanitizeWeeklySummary: function (text) {
-    var cleaned = String(text || '').replace(/\r\n/g, '\n').trim();
+    var cleaned = Logic.stripChatMentions_(String(text || ''))
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
     if (!cleaned) return '';
     return Logic.truncateText(cleaned, Logic.MAX_WEEKLY_SUMMARY_CHARS);
   },
@@ -346,7 +385,8 @@ var Logic = {
    */
   RETIRED_OPENROUTER_MODELS: {
     'meta-llama/llama-3.3-70b-instruct:free': true,
-    'deepseek/deepseek-v4-flash:free': true
+    'deepseek/deepseek-v4-flash:free': true,
+    'qwen/qwen3.8-27b:free': true
   },
 
   /** Zero-price router. It does not end in ":free", but it does not bill. */

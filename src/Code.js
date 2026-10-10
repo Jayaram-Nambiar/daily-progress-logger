@@ -16,13 +16,10 @@
  * Monday weekly posts may send an OpenRouter summary-only message per
  * configured webhook space when OPENROUTER_API_KEY is set. Failures fall
  * back to the member detail text. Default models:
- * google/gemma-4-31b-it:free then qwen/qwen3.8-27b:free, then openrouter/free.
+ * google/gemma-4-31b-it:free then google/gemma-4-26b-a4b-it:free, then openrouter/free.
  * Final fallback: post the space's member week text unchanged.
  * The script never calls the Google Chat API and stays on the default GCP project.
  * Webhook URLs and API keys are Script Properties, not source.
- * EXAMPLE_ROSTER, EXAMPLE_SPACE_ROWS, and EXAMPLE_CHAT_USER_IDS are fictional.
- * Replace them with your own team before you rely on provision.
- * Design notes: docs/architecture.md and docs/decisions/001-incoming-webhooks.md.
  *******************************************************/
 
 const TZ = 'Asia/Kolkata';
@@ -43,7 +40,7 @@ const PROP_KEYS = {
   OPENROUTER_ENABLED: 'OPENROUTER_ENABLED'
 };
 const DEFAULT_OPENROUTER_MODELS =
-  'google/gemma-4-31b-it:free,qwen/qwen3.8-27b:free';
+  'google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const TEAM_HEADERS = ['Name', 'Slack', 'Email', 'Chat'];
 const SCHEDULE_HEADERS = ['Job', 'Enabled', 'Days', 'Hour', 'Minute'];
@@ -147,28 +144,38 @@ function addOrUpdateMember() {
   const name = (nameResp.getResponseText() || '').trim();
   if (!name) { ui.alert('Name is required.'); return; }
 
-  const chatResp = ui.prompt('Google Chat user id', 'Optional. Paste <users/ID> or the numeric id to ping them in the space. Cancel aborts.', ui.ButtonSet.OK_CANCEL);
-  if (chatResp.getSelectedButton() !== ui.Button.OK) return;
-  const emailResp = ui.prompt('Email', 'Optional. Used only for the reminder email. Cancel aborts.', ui.ButtonSet.OK_CANCEL);
+  const emailResp = ui.prompt(
+    'Email',
+    'Optional. @arcaai.com address. Used for the reminder email and to fill the Chat mention when that address is in the roster map. Cancel aborts.',
+    ui.ButtonSet.OK_CANCEL
+  );
   if (emailResp.getSelectedButton() !== ui.Button.OK) return;
 
-  const chat = normalizeChatMention_(chatResp.getResponseText());
-  const email = (emailResp.getResponseText() || '').trim();
+  const emailInput = (emailResp.getResponseText() || '').trim();
   const team = ensureTeamSheet_();
   const existing = readTeamRows_(team).find(m => m.name.toLowerCase() === name.toLowerCase());
+  const email = emailInput || (existing ? existing.email : '');
+  const resolved = Logic.resolveChatMention(email, CHAT_USER_IDS, existing ? existing.chat : '');
   if (existing) {
     renameMatrixMember_(existing.name, name);
     team.getRange(existing.row, 1).setValue(name);
     team.getRange(existing.row, 3).setValue(email);
-    team.getRange(existing.row, 4).setValue(chat);
+    team.getRange(existing.row, 4).setValue(resolved.mention);
   } else {
-    team.appendRow([name, '', email, chat]);
+    team.appendRow([name, '', email, resolved.mention]);
   }
   applyTeamSpacesDropdown_(team);
   syncReminderMatrix_();
   syncOneMember_(name);
   autoResize_(team);
-  ui.alert(existing ? `Updated ${name}. Slack id was left unchanged.` : `Added ${name} and created their sheet.`);
+  const chatNote = resolved.source === 'map'
+    ? ' Chat mention filled from the email map.'
+    : resolved.source === 'kept'
+      ? ' Chat user id is not in the email map. The existing mention was kept.'
+      : ' Chat user id is not in the email map. Team column D was left blank.';
+  ui.alert((existing
+    ? `Updated ${name}. Slack id was left unchanged.`
+    : `Added ${name} and created their sheet.`) + chatNote);
 }
 
 function syncMemberSheets() {
@@ -206,16 +213,36 @@ function syncOneMember_(name) {
   autoResize_(sh);
 }
 
-const EXAMPLE_ROSTER = [
-  ['Alex Rivera', 'alex.rivera@example.com'],
-  ['Sam Chen', 'sam.chen@example.com'],
-  ['Jordan Patel', 'jordan.patel@example.com']
+const ROSTER = [
+  ['Dr. Jayaram Nambiar', 'dr.jayaram@arcaai.com'],
+  ['Sumankumar Singh', 'sumankumar@arcaai.com'],
+  ['Tushar Asthana', 'tushar@arcaai.com'],
+  ['Ananthakrishna B', 'anantha@arcaai.com'],
+  ['Indumati Vastrad', 'indumati@arcaai.com'],
+  ['Josekutty George', 'josekutty@arcaai.com'],
+  ['Karan Mohan', 'karan@arcaai.com'],
+  ['Karthik Iyer', 'karthik@arcaai.com'],
+  ['Neena A Panicker', 'neena@arcaai.com'],
+  ['Nitik Dias', 'nitik@arcaai.com'],
+  ['Ramya Satish Kumar', 'ramya@arcaai.com'],
+  ['Rijna Shameen', 'rijna@arcaai.com'],
+  ['Rohit Rajan', 'rohit@arcaai.com'],
+  ['Shibu Ignatious', 'dr.shibu@arcaai.com'],
+  ['Surya Prakash', 'surya@arcaai.com'],
+  ['Tap Do Huy Huynh', 'tap@arcaai.com'],
+  ['Vidit Khairkar', 'vidit@arcaai.com']
 ];
 
-const EXAMPLE_SPACE_ROWS = [
-  ['TEAM_ALPHA', 'EXAMPLESPACEALPHA', 'GOOGLE_CHAT_WEBHOOK_URL', false],
-  ['TEAM_BETA', 'EXAMPLESPACEBETA1', 'GOOGLE_CHAT_WEBHOOK_TEAM_BETA', false],
-  ['TEAM_GAMMA', 'EXAMPLESPACEGAMMA', 'GOOGLE_CHAT_WEBHOOK_TEAM_GAMMA', false]
+const SPACE_ROWS = [
+  ['HAK_HEALTH_A_THON', 'AAQALEBwG_c', 'GOOGLE_CHAT_WEBHOOK_HAK_HEALTH_A_THON', false],
+  ['PRJ_VOX', 'AAQA-0Z41U4', 'GOOGLE_CHAT_WEBHOOK_URL', true],
+  ['LAB_STATUS_NOTICE', 'AAQAautJJpw', 'GOOGLE_CHAT_WEBHOOK_LAB_STATUS_NOTICE', false],
+  ['LEARNING_ARCA', 'AAQAZB4dIEU', 'GOOGLE_CHAT_WEBHOOK_LEARNING_ARCA', false],
+  ['PRJ_AURA', 'AAQAoanHnMA', 'GOOGLE_CHAT_WEBHOOK_PRJ_AURA', false],
+  ['PRJ_TRUECLAIM', 'AAQAjn_vK0E', 'GOOGLE_CHAT_WEBHOOK_PRJ_TRUECLAIM', false],
+  ['CORE_ENGINEERING', 'AAQAKebVtzU', 'GOOGLE_CHAT_WEBHOOK_CORE_ENGINEERING', false],
+  ['Leaders & Managers', 'AAQAdLsaqpE', 'GOOGLE_CHAT_WEBHOOK_LEADERS_MANAGERS', false],
+  ['PRJ_PATHREADY_INT', 'AAQAsNpLVh4', 'GOOGLE_CHAT_WEBHOOK_PRJ_PATHREADY_INT', false]
 ];
 
 function provisionRosterFromMenu() {
@@ -237,7 +264,7 @@ function provisionRosterSpacesAndSheets() {
     if (m.email) byEmail[m.email.toLowerCase()] = m;
   });
 
-  EXAMPLE_ROSTER.forEach(pair => {
+  ROSTER.forEach(pair => {
     const name = pair[0];
     const email = pair[1].toLowerCase();
     const existing = byEmail[email];
@@ -257,24 +284,38 @@ function provisionRosterSpacesAndSheets() {
     team.getRange(existing.row, 3).setValue(email);
   });
 
-  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  ensureChatSpacesSheet_(SPACE_ROWS);
   fillChatMentions_();
   syncReminderMatrix_();
   ensureSchedulesSheet_();
   readTeamRows_(team).forEach(m => syncOneMember_(m.name));
 }
 
-// Fictional Chat user ids for the example roster. Replace with your own.
-const EXAMPLE_CHAT_USER_IDS = {
-  'alex.rivera@example.com': '900000000000000000001',
-  'sam.chen@example.com': '900000000000000000002',
-  'jordan.patel@example.com': '900000000000000000003'
+// Numeric ids from the signed-in Chat session (user/human/<id>). Not secrets.
+const CHAT_USER_IDS = {
+  'dr.jayaram@arcaai.com': '105136892834486514658',
+  'sumankumar@arcaai.com': '110367492583288019964',
+  'tushar@arcaai.com': '109313311788049396884',
+  'anantha@arcaai.com': '109473194711852956541',
+  'indumati@arcaai.com': '100542642015747516815',
+  'josekutty@arcaai.com': '112217037113835338884',
+  'karan@arcaai.com': '105560557556056333545',
+  'karthik@arcaai.com': '116148811746914162896',
+  'neena@arcaai.com': '112238864895487291779',
+  'nitik@arcaai.com': '105624718225903316093',
+  'ramya@arcaai.com': '107878147491660645515',
+  'rijna@arcaai.com': '104338317742127926068',
+  'rohit@arcaai.com': '117885350726889887078',
+  'dr.shibu@arcaai.com': '106177154370554184641',
+  'surya@arcaai.com': '114773095626200612235',
+  'tap@arcaai.com': '114622970193957514150',
+  'vidit@arcaai.com': '116156027267557744097'
 };
 
 function fillChatMentions_() {
   const team = ensureTeamSheet_();
   readTeamRows_(team).forEach(m => {
-    const id = EXAMPLE_CHAT_USER_IDS[(m.email || '').toLowerCase()];
+    const id = CHAT_USER_IDS[(m.email || '').toLowerCase()];
     if (!id) return;
     if (/^<users\/\d+>$/i.test(normalizeChatMention_(m.chat))) return;
     team.getRange(m.row, 4).setValue(`<users/${id}>`);
@@ -334,7 +375,7 @@ function syncReminderMatrix_() {
   const ss = SpreadsheetApp.getActive();
   const team = ensureTeamSheet_();
   const legacy = legacyRemindByName_(team);
-  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  ensureChatSpacesSheet_(SPACE_ROWS);
   const spaces = ss.getSheetByName(SHEETS.SPACES);
   const spaceNames = spaces && spaces.getLastRow() >= 2
     ? spaces.getRange(2, 1, spaces.getLastRow() - 1, 1).getValues().map(r => String(r[0] || '').trim()).filter(Boolean)
@@ -794,7 +835,7 @@ function setGoogleChatWebhookUrl() {
 function setGoogleChatWebhookForSpace() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActive();
-  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  ensureChatSpacesSheet_(SPACE_ROWS);
   const spaces = ss.getSheetByName(SHEETS.SPACES);
   if (!spaces || spaces.getLastRow() < 2) {
     ui.alert('Chat Spaces sheet is missing.');
@@ -855,7 +896,7 @@ function testGoogleChatWebhook() {
 function testAllGoogleChatWebhooks() {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActive();
-  ensureChatSpacesSheet_(EXAMPLE_SPACE_ROWS);
+  ensureChatSpacesSheet_(SPACE_ROWS);
   const spaces = ss.getSheetByName(SHEETS.SPACES);
   if (!spaces || spaces.getLastRow() < 2) {
     ui.alert('Chat Spaces sheet is missing.');
@@ -1427,7 +1468,7 @@ function summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD
 
   const headers = {
     Authorization: 'Bearer ' + apiKey,
-    'HTTP-Referer': SpreadsheetApp.getActiveSpreadsheet().getUrl(),
+    'HTTP-Referer': 'https://docs.google.com/spreadsheets/d/1NHSu_IvUWXnNJqyEbqnAydQ4joftWk6DP68RPQRgMX4',
     'X-Title': 'Daily Progress Logger weekly roll-up'
   };
 
@@ -1535,7 +1576,7 @@ function ensureTeamSheet_() {
   if (String(have[4] || '').trim() !== 'Spaces') team.getRange(1, 5).setValue('Spaces').setFontWeight('bold');
   team.getRange(1, 5).setNote(
     'Multi-select dropdown of Chat Spaces names (Chat Spaces!A2:A). ' +
-    'Existing selections stay as chips. Menu 16 applies this column to the reminder matrix. ' +
+    'Existing selections stay as chips. **Apply Team spaces to reminder matrix** applies this column to the reminder matrix. ' +
     'The script does not call the Chat API and must not recreate this rule with setDataValidation ' +
     '(that drops Allow multiple selections).'
   );
