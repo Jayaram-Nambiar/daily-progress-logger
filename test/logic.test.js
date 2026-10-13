@@ -220,7 +220,7 @@ assert.strictEqual(Logic.isFreeOpenRouterModel('openrouter/free'), true);
 const body = Logic.openRouterChatBody('google/gemma-4-31b-it:free', 'system', 'user');
 assert.strictEqual(body.model, 'google/gemma-4-31b-it:free');
 assert.strictEqual(body.reasoning.effort, 'none');
-assert.strictEqual(body.max_tokens, 700);
+  assert.strictEqual(body.max_tokens, 1200);
 assert.strictEqual(body.messages[1].content, 'user');
 
 const chatWhitespace = Logic.buildWeeklyChatMessage(
@@ -273,6 +273,7 @@ const namedPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-09-28', 
 assert.ok(namedPrompt.indexOf('Ada') >= 0);
 assert.strictEqual(namedPrompt.indexOf('<users/'), -1);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not restate every daily line') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not omit a member') >= 0);
 
 const cleanedSummary = Logic.sanitizeWeeklySummary('• Ada shipped login <users/105>.');
 assert.ok(cleanedSummary.indexOf('Ada shipped login') >= 0);
@@ -286,6 +287,32 @@ const safeChat = Logic.buildWeeklyChatMessage(
 );
 assert.strictEqual(safeChat.indexOf('<users/'), -1);
 assert.ok(safeChat.indexOf('raw line') < 0);
+
+const namedSummary = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-10-05',
+  '2026-10-11',
+  '• Konduka Sanjali tested transcription.',
+  [{ member: 'Konduka Sanjali', label: '<users/102>', text: '• Wed: raw detail <users/102>' }]
+);
+assert.ok(namedSummary.indexOf('tested transcription') >= 0);
+assert.ok(namedSummary.indexOf('raw detail') < 0);
+assert.strictEqual(namedSummary.indexOf('<users/'), -1);
+
+const restoredMember = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-10-05',
+  '2026-10-11',
+  '• Rijna Shameen wrote API docs.',
+  [
+    { member: 'Rijna Shameen', label: '<users/1>', text: '• Mon: docs' },
+    { member: 'Konduka Sanjali', label: '<users/102>', text: '• Wed: tested transcription' }
+  ]
+);
+assert.ok(restoredMember.indexOf('Rijna Shameen') >= 0);
+assert.ok(restoredMember.indexOf('• Mon: docs') < 0);
+assert.ok(restoredMember.indexOf('Konduka Sanjali') >= 0);
+assert.ok(restoredMember.indexOf('tested transcription') >= 0);
 
 assert.strictEqual(Logic.isFreeOpenRouterModel('qwen/qwen3.8-27b:free'), false);
 assert.strictEqual(

@@ -216,19 +216,19 @@ var Logic = {
     return { headers: ['Member'].concat(spaceNames), grid: grid };
   },
 
-  MAX_WEEKLY_SOURCE_CHARS: 12000,
-  MAX_WEEKLY_SUMMARY_CHARS: 1500,
+  MAX_WEEKLY_SOURCE_CHARS: 24000,
+  MAX_WEEKLY_SUMMARY_CHARS: 4000,
 
   WEEKLY_SUMMARY_SYSTEM:
     'You write a short weekly progress summary for one Google Chat space. ' +
     'Use only the provided text. Do not invent work, people, dates, hours, or blockers. ' +
     'Each update is tagged [YYYY-MM-DD]. Attribute work to the member name on its heading. ' +
     'Never output a <users/...> token or a numeric user id. ' +
-    'Do not restate every daily line. Group related work by person into one or two bullets. ' +
+    'Write one bullet for each member in the source. Do not omit a member. ' +
+    'Do not restate every daily line. Put that member\'s work in the one bullet. ' +
     'Name a blocker only when the source states one. ' +
-    'If the week is sparse, use fewer bullets. ' +
-    'Output plain text only: 3 to 6 bullets starting with "• ". No markdown headings.\n' +
-    'Example input: Ada / [2026-09-14] shipped login / [2026-09-15] fixed export — Blockers: staging.\n' +
+    'Output plain text only. Each bullet starts with "• ". No markdown headings.\n' +
+    'Example input: Ada / [2026-09-14] shipped login / [2026-09-15] fixed export. Blockers: staging.\n' +
     'Example output:\n' +
     '• Ada shipped login on 2026-09-14 and fixed export on 2026-09-15. Blocker: staging.',
 
@@ -332,6 +332,21 @@ var Logic = {
     return Logic.truncateText(cleaned, Logic.MAX_WEEKLY_SUMMARY_CHARS);
   },
 
+  /**
+   * Members whose name is absent from the summary text.
+   * Blocks with no member name are ignored.
+   */
+  membersOmittedFromSummary_: function (summary, memberBlocks) {
+    var text = String(summary || '').toLowerCase();
+    var missing = [];
+    (memberBlocks || []).forEach(function (block) {
+      var name = String((block && block.member) || '').trim();
+      if (!name) return;
+      if (text.indexOf(name.toLowerCase()) < 0) missing.push(block);
+    });
+    return missing;
+  },
+
   buildWeeklyChatMessage: function (spaceName, weekStartYmd, weekEndYmd, aiSummary, memberBlocks) {
     var lines = [
       '*Weekly roll-up — ' + spaceName + ' — ' + weekStartYmd + ' → ' + weekEndYmd + '*',
@@ -340,6 +355,11 @@ var Logic = {
     var summary = Logic.sanitizeWeeklySummary(aiSummary);
     if (summary) {
       lines.push(summary);
+      Logic.membersOmittedFromSummary_(summary, memberBlocks).forEach(function (block) {
+        lines.push('');
+        lines.push(Logic.weeklyPromptHeading_(block));
+        lines.push(Logic.stripChatMentions_(String((block && block.text) || '')));
+      });
       lines.push('');
       return lines.join('\n');
     }
@@ -429,7 +449,7 @@ var Logic = {
     return {
       model: model,
       temperature: 0.2,
-      max_tokens: 700,
+      max_tokens: 1200,
       reasoning: { effort: 'none' },
       messages: [
         { role: 'system', content: systemPrompt },

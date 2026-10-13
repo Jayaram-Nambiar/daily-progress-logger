@@ -49,7 +49,7 @@ On a schedule (Asia/Kolkata):
 |---|---|
 | Weekdays ~18:00 | Reminder in each Chat space for people who are checked on the Reminder Matrix and have not logged today for that space. Also one email per person listing spaces they still owe. |
 | Weekdays ~19:00 | Today’s rows are posted to Google Chat, split by the Space column (only spaces with a webhook). |
-| Monday ~09:00 | Previous Mon–Sun week is written to **Weekly Rollup**. Each space with a webhook gets a **summary-only** Chat post (OpenRouter free models when keyed). If LLM fails, that space gets the member week text as-is. |
+| Monday ~09:00 | The script writes the previous Monday–Sunday week to **Weekly Rollup**. Each space with a webhook gets one summary. The script appends any member the model omits. If every model fails, that space gets the member week text. |
 
 The script never calls the Google Chat API. It posts only through **incoming webhooks** stored as Script Properties. Slack code exists but does not send (`SLACK_ENABLED = false`).
 
@@ -275,7 +275,7 @@ When configured and enabled:
 1. For each Chat space that has a webhook **and** at least one previous-week member update tagged to that space…
 2. The script calls OpenRouter (`UrlFetchApp` only — stays on default GCP).
 3. Primary free model, then fallback free model.
-4. Chat receives a **summary-only** message (no per-member dump).
+4. Chat receives one summary. The script appends any member the model omits.
 5. Summaries are stored on sheet **Weekly Space Summaries** and reused on re-runs.
 6. If every free model fails (or returns empty), Chat gets that space’s member week text **unchanged**.
 
@@ -327,7 +327,7 @@ Weekly posts continue with member-text fallback only.
 1. Confirm `OPENROUTER_API_KEY` is set (**Set OpenRouter API key**).
 2. Prefer waiting for Monday ~09:00, **or** run **Run weekly roll-up now** once when you intentionally want live posts.
 3. Check **Weekly Space Summaries** for new LLM Summary rows.
-4. Read one Chat space that had previous-week content — expect summary-only bullets when LLM succeeded.
+4. Read one Chat space that had previous-week content. Expect one bullet per member when the model succeeded. Expect that member's week text when the model omitted the name.
 5. Apps Script → **Executions**: look for OpenRouter HTTP errors if a space fell back to member text.
 
 Re-running weekly roll-up **reuses** stored summaries unless code is changed to force regeneration. Clearing the matching **Weekly Space Summaries** row forces a fresh LLM call on the next run (when enabled).
@@ -351,20 +351,46 @@ If you change `OPENROUTER_MODEL`, keep only `:free` ids. After changing models b
 
 ### For each member
 
+Log the row before 19:00 Asia/Kolkata on a weekday.
+
 1. Open your personal tab.
-2. Add a row: today’s date, summary, optional hours / blockers / tomorrow plan.
-3. Set **Space** from the dropdown to the project that should receive the update.
-4. A blank or invalid Space on a today row shows a toast; that row will not post and will not clear a reminder for any space.
+2. The tab name must match your name on Team.
+3. Add one row for today.
+4. Set Date to today.
+5. Write a Summary.
+6. Hours, Blockers, and Tomorrow Plan are optional.
+7. Set Space from the dropdown.
+8. Use the exact Chat space name.
+9. Leave the row saved before 19:00.
+
+The 19:00 job reads Team. Then it reads each personal tab.
+It keeps a row only when all three are true.
+
+- Date is today in Asia/Kolkata.
+- Summary is not empty.
+- Space equals the Chat space name.
+
+A blank Space posts to no space.
+A row saved after 19:00 waits for the next weekday.
+A past date is not in that 19:00 post.
+Monday 09:00 reads the previous Monday through Sunday.
+A row added after that Monday job is not in that week post.
+**Run weekly roll-up now** posts that week to Chat again.
+Run it only when you want a second Chat post.
+
+A blank or invalid Space on a today row shows a toast.
+That row does not post.
+That row does not clear a reminder.
 
 ### For an operator
 
 | Task | Action |
 |---|---|
-| Someone joined a Chat space | Update Team E → **Apply Team spaces to reminder matrix** |
-| New project space | Add Chat Spaces row → create webhook → set Script Property → sync matrix → fill Team E |
-| Change reminder / post time | Edit Schedules or menus 11–13 / 17 → Apply |
-| Turn off LLM summaries | `OPENROUTER_ENABLED=0` or clear key via **Set OpenRouter API key** |
-| Check why a space got no post | Configured checkbox, webhook property, Space column on rows, Executions log |
+| Someone joined a Chat space | Update Team column E. Then run **Apply Team spaces to reminder matrix**. |
+| New project space | Add a Chat Spaces row. Create the webhook. Save it with **Set Chat webhook…**. Fill Team column E. Run **Sync reminder matrix**. |
+| Change a clock time | Edit the Schedules sheet. Then run **Apply schedules from sheet**. |
+| Disable LLM summaries | Set `OPENROUTER_ENABLED` to `0`. Or clear the key with **Set OpenRouter API key**. |
+| A space got no post | Check Configured, the webhook property, the Space cell, and Executions. |
 
 ---
 
@@ -419,12 +445,12 @@ Team column D stores:
 
 Steps:
 
-1. Open `https://chat.google.com/app/management/<SPACE_ID>` → **Manage members** → **Added**.
-2. Scroll until the person’s **name and email** are visible (virtualized list).
-3. `Ctrl+Shift+I` → `Ctrl+Shift+C` → click the **name**.
-4. Walk up parents until you see `data-name`, `data-member-id`, and `data-hovercard-id`.
-5. Match `data-hovercard-id` to Team column C email.
-6. Copy digits after `user/human/` into Team D as `<users/DIGITS>`.
+1. Open `https://chat.google.com/app/management/<SPACE_ID>`. The **Members** table lists **Name**, **Email**, and **Role**. It does not show a user id.
+2. Scroll until the person’s name and email are visible.
+3. `Ctrl+Shift+I` → `Ctrl+Shift+C` → click the **row** (name, email, or role). If the selected node is only the name text, select its parent `div`.
+4. On that row, read `data-member-id="user/human/DIGITS"` and `data-hovercard-id` (the email). These are HTML attributes, not cells in the table.
+5. Match `data-hovercard-id` to Team column C.
+6. Copy the digits after `user/human/` into Team D as `<users/DIGITS>`.
 
 Do not put `user/human/...` or the email in column D. A bare number is accepted by `normalizeChatMention_` and rewritten to `<users/...>`.
 
@@ -436,31 +462,316 @@ Ids already collected are in the [appendix](#182-chat-user-ids-already-collected
 
 ## 11. Menu reference
 
-Reload the spreadsheet after a clasp push so `onOpen` rebuilds the menu.
+The custom menu name is **Daily Progress**.
+`onOpen` builds it when you open the workbook.
+Reload the workbook after `npm run push`.
+The reload loads the new menu.
 
-| Menu item | Function | What it does |
-|---|---|---|
-| Add or update member | `addOrUpdateMember` | Name and email prompts. Fills Chat (D) from `CHAT_USER_IDS` when the email matches. Keeps an existing `<users/DIGITS>` mention when it does not. Syncs the personal sheet |
-| Sync member sheets | `syncMemberSheets` | Ensure personal tabs / headers / Space dropdown |
-| Bootstrap roster, spaces & sheets | `provisionRosterFromMenu` | Roster merge, Chat Spaces, mentions, matrix, schedules, member tabs |
-| Set Chat webhook… | `setGoogleChatWebhookForSpace` | Prompt for Chat Spaces name + URL; checks space id; writes that row’s Script Property |
-| Test Chat webhooks | `testAllGoogleChatWebhooks` | One test post per Chat Spaces row that has a webhook property; reports OK/Failed |
-| Post today’s updates now | `postDailyUpdatesToChat` | Immediate daily post |
-| Send reminders now | `sendReminderNow` | Immediate reminders (Chat + email mention the Schedules **Daily post** time) |
-| Run weekly roll-up now | `runWeeklyRollupNow` | Immediate weekly collate + Chat posts (LLM if keyed) |
-| Sync reminder matrix | `syncReminderMatrixFromMenu` | Add/drop people and spaces; keep checks |
-| Apply Team spaces to reminder matrix | `refreshSpaceAccess` | Column E → matrix; sets `SPACE_ACCESS_SYNCED=1` |
-| Apply schedules from sheet | `applySchedulesFromMenu` | Reinstall triggers from the **Schedules** sheet (edit the sheet, then run this) |
-| Set OpenRouter API key | `setOpenRouterApiKey` | Save/clear key; write free-tier model list |
+Open the workbook in Chrome as `dr.jayaram@arcaai.com`.
+Click **Daily Progress**.
+Each item below names the Apps Script function.
+Cancel on any prompt stops that item.
+A prompt does not change the sheet until you click OK.
 
-Removed from the menu (still in source for compatibility or Slack-only paths):
+The menu does not call the Google Chat API.
+Posts use incoming webhooks only.
 
-- **Ensure Team headers** — covered by Bootstrap / Sync
-- **PRJ_VOX-only set/test webhook** — replaced by Set/Test Chat webhooks for every space
-- **Per-job schedule prompts** (reminder / daily / weekly / space access) — edit the **Schedules** sheet, then **Apply schedules from sheet**
-- **Remove daily Slack post trigger** — Slack-only; Apply schedules also deletes that old trigger. Appears under Slack items only when `SLACK_ENABLED` is true
+### 11.1 Add or update member
 
-Slack menu items appear only if `SLACK_ENABLED` is true (it is not).
+Function: `addOrUpdateMember`.
+
+Use this item to add one member.
+Use it again to change that member's name or email.
+
+1. Click **Add or update member**.
+2. Type the full name.
+3. Click OK.
+4. Type the `@arcaai.com` email.
+5. Click OK.
+
+A blank name stops the item.
+The script matches the name on Team.
+A match updates that row.
+A new name adds a row.
+The script fills Chat from `CHAT_USER_IDS` when the email is in that map.
+The script keeps an existing `<users/DIGITS>` value when the email is not in the map.
+A blank Chat cell stays blank when the email is not in the map.
+The script creates the personal tab when it is missing.
+The script adds the Space dropdown on that tab.
+The script syncs the Reminder Matrix.
+An update does not change the Slack cell.
+The item does not ask you to paste a Chat user id.
+Set Spaces in column E after this item.
+Then run **Apply Team spaces to reminder matrix**.
+
+### 11.2 Sync member sheets
+
+Function: `syncMemberSheets`.
+
+Use this item after you edit Team by hand.
+
+1. Click **Sync member sheets**.
+2. Read the alert.
+3. The alert states how many tabs the script synced.
+
+The script reads each name on Team.
+It creates a missing personal tab.
+It writes a header cell only when that cell is wrong.
+It does not delete tabs.
+It does not clear body rows.
+It sets the date format on column A.
+It sets the Space dropdown on column F.
+**Add or update member** already syncs that one tab.
+
+### 11.3 Bootstrap roster, spaces and sheets
+
+Function: `provisionRosterFromMenu`.
+The function calls `provisionRosterSpacesAndSheets`.
+
+Use this item on an empty workbook.
+Use it again when the built-in roster must exist.
+
+1. Click **Bootstrap roster, spaces & sheets**.
+2. Wait for the alert.
+
+The script adds each `ROSTER` email that is missing.
+It does not delete extra Team rows.
+It writes the roster name onto a matching email row.
+It creates Chat Spaces rows for the nine project spaces.
+It fills a blank Chat cell from `CHAT_USER_IDS`.
+It does not replace an existing `<users/DIGITS>` cell.
+It syncs the Reminder Matrix.
+It creates personal tabs.
+It writes default rows on Schedules when that sheet is empty.
+It does not install the Space access trigger unless that Schedules row is enabled.
+
+`ROSTER` includes Konduka Sanjali (`sanjali@arcaai.com`).
+
+### 11.4 Set Chat webhook…
+
+Function: `setGoogleChatWebhookForSpace`.
+
+Use this item when a space needs a webhook.
+Do not paste the URL into the sheet or into git.
+
+1. Open the Chat space.
+2. Open Apps & integrations.
+3. Open Incoming webhooks.
+4. Copy the webhook URL.
+5. Click **Set Chat webhook…**.
+6. Type the exact name from Chat Spaces column A.
+7. Click OK.
+8. Paste the URL.
+9. Click OK.
+
+The script stores the URL as that row's Script Property.
+It rejects a URL whose space id differs from column B.
+It refreshes the Configured column.
+The alert names the property.
+The property value stays out of the sheet.
+
+### 11.5 Test Chat webhooks
+
+Function: `testAllGoogleChatWebhooks`.
+
+This item posts one test message to each configured space.
+Use it only when you intend those live posts.
+A test already landed in PRJ_VOX on 2026-09-25.
+
+1. Click **Test Chat webhooks**.
+2. Read the alert.
+3. The alert lists OK or Failed for each space.
+4. Open a Failed space in Chat only if you need the error text.
+
+A space with no webhook property is not in the test.
+A Failed line means that webhook did not accept the post.
+
+### 11.6 Post today’s updates now
+
+Function: `postDailyUpdatesToChat`.
+
+This item runs the 19:00 job at once.
+It posts to live Chat spaces.
+Use it when you want today's post before 19:00.
+Do not use it to replay a past day.
+
+1. Check that each wanted row has today's date.
+2. Check that Summary is not empty.
+3. Check that Space matches the Chat space name.
+4. Click **Post today’s updates now**.
+5. Read the alert.
+6. Open the Chat space and read the post.
+
+The script reads each Team member's tab once.
+It groups lines by the Space cell.
+It posts only to spaces whose webhook is set.
+A space with no matching rows gets no message.
+The job does not use the Reminder Matrix.
+The job does not call OpenRouter.
+
+The keep test in `postDailyUpdatesToChat_` is:
+
+```javascript
+if (rowDate !== today || !summary || !spaceName) return;
+```
+
+`today` is the script date in Asia/Kolkata.
+`summary` is the trimmed Summary cell.
+`spaceName` is the trimmed Space cell.
+
+### 11.7 Send reminders now
+
+Function: `sendReminderNow`.
+The function calls `sendReminder_`.
+
+This item posts reminders to live Chat.
+It also sends one email per person who still owes a row.
+
+1. Click **Send reminders now**.
+2. Read the alert.
+3. Open the Chat space if you need the reminder text.
+
+A person is in a space reminder only when both are true.
+
+- The Reminder Matrix cell for that space is checked.
+- That person has no today row for that space.
+
+A today row needs a non-empty Summary and a matching Space.
+The Chat text and the email name the Daily post time from Schedules.
+The default time is 19:00 IST.
+
+### 11.8 Run weekly roll-up now
+
+Function: `runWeeklyRollupNow`.
+The function calls `weeklyCollatePreviousWeek_`.
+
+This item writes Weekly Rollup.
+It posts the previous week to each configured Chat space.
+A second run posts that week again.
+Run it only when you want that live post.
+
+1. Click **Run weekly roll-up now**.
+2. Read the alert.
+3. Open Weekly Rollup.
+4. Open Weekly Space Summaries when OpenRouter is on.
+5. Open one Chat space and read the post.
+
+The week is the previous Monday through Sunday in Asia/Kolkata.
+The script keeps a row with the same three rules as the daily post.
+The date must fall inside that week.
+The script does not read rows that were absent at run time.
+A later edit of an old week is not in Chat until you run this item again.
+
+When OpenRouter returns text, Chat gets that summary.
+The script appends each member whose name is missing from the summary.
+When every model fails, Chat gets the member text for that space.
+A space with no week rows gets no Chat post.
+
+### 11.9 Sync reminder matrix
+
+Function: `syncReminderMatrixFromMenu`.
+The function calls `syncReminderMatrix_`.
+
+1. Click **Sync reminder matrix**.
+2. Open Reminder Matrix.
+3. Check the boxes for spaces that should remind that member.
+
+The script adds members who are on Team.
+The script adds columns for Chat Spaces names.
+It keeps an existing check.
+It drops a row when that name is no longer on Team.
+A rename on Team keeps the checks with that person.
+This item does not blank cells for spaces the member is not in.
+Use **Apply Team spaces to reminder matrix** for that blank.
+
+### 11.10 Apply Team spaces to reminder matrix
+
+Function: `refreshSpaceAccess`.
+
+Team column E is the membership source.
+The cell is a multi-select list from Chat Spaces.
+The stored value is a comma-separated list.
+
+1. Set column E with the chip dropdown.
+2. Click **Apply Team spaces to reminder matrix**.
+3. Read the alert.
+4. Open Reminder Matrix.
+5. A cell is blank when that member is not in that space.
+6. An existing check stays when the member remains in that space.
+
+The script sets Script Property `SPACE_ACCESS_SYNCED` to `1`.
+The script does not read live Chat membership.
+An empty Spaces column stops the item.
+Do not call `setDataValidation` on column E.
+That call drops the multi-select chips.
+
+### 11.11 Apply schedules from sheet
+
+Function: `applySchedulesFromMenu`.
+
+Edit Schedules first.
+Then run this item.
+The item deletes the old clock triggers.
+It creates one trigger for each enabled row.
+
+1. Open the Schedules sheet.
+2. Set Days, Hour, Minute, and Enabled.
+3. Click **Apply schedules from sheet**.
+4. Open Extensions, then Apps Script, then Triggers.
+5. Check the handler names and the Asia/Kolkata times.
+
+Default rows:
+
+| Job | Days | Time | Handler |
+|---|---|---|---|
+| Reminder | Weekdays | 18:00 | `sendReminder_trigger` |
+| Daily post | Weekdays | 19:00 | `postDailyUpdatesToChat_trigger` |
+| Weekly roll-up | Monday | 09:00 | `weeklyRollup_trigger` |
+| Space access | Weekdays | 08:00 | `refreshSpaceAccess_trigger` |
+
+Leave Space access disabled until you want the 08:00 reapply.
+That job only reapplies column E.
+It cannot refresh Chat membership.
+Apps Script may start a job up to about 15 minutes after the set minute.
+
+### 11.12 Set OpenRouter API key
+
+Function: `setOpenRouterApiKey`.
+
+The key is a Script Property.
+Do not put the key in git, the sheet, or Chat.
+
+1. Click **Set OpenRouter API key**.
+2. Paste the key from openrouter.ai.
+3. Click OK.
+4. Leave the box empty and click OK when you want to clear the key.
+
+A saved key also writes `OPENROUTER_MODEL` to the free defaults.
+It sets `OPENROUTER_ENABLED` to `1` when that property is missing.
+A cleared key stops LLM summaries.
+Weekly posts then use the member text.
+
+### 11.13 Items that are not on the menu
+
+These functions remain in `src/Code.js`.
+The menu does not show them while Slack is off.
+`SLACK_ENABLED` is false.
+
+| Former item | Current path |
+|---|---|
+| Ensure Team headers | **Bootstrap roster, spaces & sheets** or **Sync member sheets** |
+| One webhook item for PRJ_VOX only | **Set Chat webhook…** and **Test Chat webhooks** |
+| Separate prompts for each clock job | Edit Schedules. Then run **Apply schedules from sheet**. |
+| Remove daily Slack post trigger | Hidden while Slack is off. **Apply schedules from sheet** also deletes that old trigger. |
+
+Slack items appear only when `SLACK_ENABLED` is true.
+The items are:
+
+- Set Slack webhook URL
+- Test Slack webhook
+- Install daily 8:30 PM IST Slack post
+- Post today’s Slack summary now
+- Remove daily Slack post trigger
 
 ---
 
@@ -487,10 +798,11 @@ See [§6.1](#61-team-columns). Header frozen. Do not `clear()` the sheet.
 | B | Summary | Required for posting and for “updated” |
 | C | Hours | Parsed by `parseHoursToNumber_` |
 | D | Blockers | Included in daily / weekly member text |
-| E | Tomorrow Plan | Daily Chat only; omitted from weekly roll-up |
+| E | Tomorrow Plan | Daily Chat only. The weekly roll-up omits this column. |
 | F | Space | Dropdown from Chat Spaces. Blank → nowhere |
 
-Do not insert Space between A–E; `syncOneMember_` is position-based.
+Do not insert Space between columns A and E.
+`syncOneMember_` reads columns by position.
 
 ### Reminder Matrix / Schedules / Weekly Rollup / Weekly Space Summaries
 
@@ -506,7 +818,7 @@ Keep a member row only when:
 
 1. Date is **today** (Asia/Kolkata `yyyy-MM-dd`)
 2. Summary is non-empty
-3. Space equals that Chat Spaces name exactly (case-sensitive; use the dropdown)
+3. Space equals that Chat Spaces name. The match is case-sensitive. Use the dropdown.
 
 If nobody matches, that space gets **no** message (no “no updates” spam).
 
@@ -516,21 +828,45 @@ Matrix cell checked **and** no qualifying today row for that space → include i
 
 ### Weekly roll-up
 
-Previous Monday–Sunday (Asia/Kolkata). Same Space filter. Written to **Weekly Rollup**. Chat: summary-only if LLM succeeds; else member blocks for that space. Spaces without a webhook are skipped for Chat (sheet rows still saved).
+The week is the previous Monday through Sunday in Asia/Kolkata.
+The script uses the same Summary and Space rules as the daily post.
+The date must fall in that week.
+The script writes **Weekly Rollup**.
+When the model returns text, Chat gets that summary.
+The script appends each member whose name is missing from the summary.
+When every model fails, Chat gets the member text for that space.
+A space with no webhook is not posted.
+The sheet rows for that space are still saved.
 
 ---
 
 ## 14. Weekly roll-up and LLM behavior
 
-1. Collate previous week per member per space (pretty dates in member text; ISO dates for LLM).
+1. Collate the previous week per member per space. Member text uses a readable date. The model input uses an ISO date.
 2. Upsert **Weekly Rollup** (`weekStart|space|member`).
 3. For each space with a webhook:
    - If OpenRouter enabled and no stored summary → call free models in order with dated prompt.
    - Write success to **Weekly Space Summaries**.
-   - Build Chat message: AI summary alone, or member detail fallback.
+   - Build the Chat message from the summary, then append any omitted member. If the summary is empty, use the member text.
    - `sendToChat_` via that space’s webhook.
 
-Prompt rules (in `src/logic.js`): use only provided text; do not invent work, people, dates, or blockers; heading is the member name; `[YYYY-MM-DD]` tags stay on the source lines; do not restate every daily line; 3–6 `• ` bullets; never emit `<users/…>` tokens.
+Prompt rules in `src/logic.js`:
+
+- Use only the provided text.
+- Do not invent work, people, dates, hours, or blockers.
+- The heading is the member name.
+- Each source line keeps its `[YYYY-MM-DD]` tag.
+- Do not restate every daily line.
+- Write one bullet for each member.
+- Do not omit a member.
+- Never write a `<users/…>` token.
+
+`buildWeeklyChatMessage` still checks the summary.
+It appends a member when that full name is absent.
+A block with no member name is not appended.
+The source limit is 24000 characters.
+The summary limit is 4000 characters.
+The request `max_tokens` value is 1200.
 
 ---
 
@@ -542,8 +878,8 @@ Prompt rules (in `src/logic.js`): use only provided text; do not invent work, pe
 | When a new project space appears | Chat Spaces row + webhook property + Team E + matrix sync |
 | After pulling code changes | `npm test` → `npm run push` → reload sheet |
 | If Monday summary looks wrong | Check Weekly Space Summaries, Executions, OpenRouter free model availability |
-| Quarterly | Spot-check Chat Spaces Configured vs Script Properties; confirm GCP still default |
-| Never | Commit Script Property values; switch GCP project; enable Chat API |
+| Quarterly | Check Chat Spaces Configured against Script Properties. Check that the Cloud project is still the default. |
+| Never | Do not commit Script Property values. Do not switch the Cloud project. Do not enable the Chat API. |
 
 ---
 
@@ -551,22 +887,24 @@ Prompt rules (in `src/logic.js`): use only provided text; do not invent work, pe
 
 | What you see | Why | What to do |
 |---|---|---|
-| Two tabs for one person | Rename after a second tab was created | Copy rows to the tab with history; delete empty duplicate |
-| Hours / Blockers look swapped | Space inserted mid-header | Move Space to column F; restore A–E headers |
-| Everyone posted into PRJ_VOX | Blank Space treated as all, or wrong column | Blank Space must be excluded; Space is column F |
+| Two tabs for one person | A rename created a second tab | Copy rows to the tab that has history. Delete the empty duplicate. |
+| Hours or Blockers look swapped | Space was inserted before column F | Move Space to column F. Restore headers A through E. |
+| Everyone posted into PRJ_VOX | Blank Space was treated as every space, or Space is the wrong column | A blank Space must stay out of every post. Space is column F. |
 | Wrong space gets rows | Shared webhook or skipped Space compare | One webhook per space; Space must equal destination name |
-| Reminder includes unchecked person | Matrix not synced / non-boolean check | **Sync reminder matrix**; checks use `=== true` |
+| Reminder includes an unchecked person | The matrix is stale, or the cell is not a real checkbox | Run **Sync reminder matrix**. A reminder requires the cell to be exactly true. |
 | Matrix still shows non-member checkboxes | Column E empty or **Apply Team spaces to reminder matrix** not run | Fill E → **Apply Team spaces to reminder matrix** |
-| **Apply Team spaces to reminder matrix** says Spaces empty | E1 ≠ `Spaces` or all blank | Fix header; set at least one list |
+| **Apply Team spaces to reminder matrix** says Spaces empty | E1 is not `Spaces`, or every Spaces cell is blank | Set the header to `Spaces`. Set at least one Spaces list. |
 | Chat API 403 / enable API dialog | Something called `chat.googleapis.com` | Cancel. Stay on default GCP. Membership is column E only |
 | Slack message appears | Flag true or old 20:30 trigger | `SLACK_ENABLED=false`, push, **Apply schedules from sheet** |
 | Ping shows `user/human/...` | Wrong Chat column format | Use `<users/digits>` |
 | Posts land in wrong space | Webhook URL space id ≠ column B | Delete webhook; recreate in correct space |
-| Weekly Chat is raw member dumps | No key, disabled, retired model ids, or every free model failed | **Set OpenRouter API key**; check `OPENROUTER_ENABLED`; Executions log. Empty **Weekly Space Summaries** means the model did not return text |
+| Weekly Chat is raw member dumps | No key, disabled, retired model ids, or every free model failed | **Set OpenRouter API key**. Check `OPENROUTER_ENABLED`. Read Executions. An empty **Weekly Space Summaries** cell means the model did not return text. |
+| A member has rows, but the 19:00 post skips them | The person was not on Team yet, the tab name differs, Date is not today, Summary is empty, or Space is blank or different | Add the person on Team before 19:00. Match the tab name to column A. Set today's date, a Summary, and Space from the dropdown. |
+| Monday Chat omits a member who is on Weekly Rollup | The model summary left that name out | Current code appends that member's week text under the summary. The stored LLM cell can still omit the name. |
 | OpenRouter HTTP 404 on llama-3.3, deepseek-v4-flash, or qwen3.8-27b `:free` | Those free ids were removed from the catalog | Current code skips them and calls `openrouter/free` last. **Set OpenRouter API key** stores the new defaults |
 | OpenRouter HTTP 402 / paid model | Non-free id in property | **Set OpenRouter API key** to reset the free list. Paid ids are ignored |
 | No daily Chat post, Executions **Failed** after several minutes with "a server error occurred" | Daily post read every member sheet once per space | Current code reads each sheet once, then posts. A single sheet that still throws is logged and skipped |
-| Only PRJ_VOX gets daily/weekly/reminder Chat posts; other spaces stay silent; Executions still **Completed** | Script Property webhook URLs stored with HTML-escaped `&amp;` (no real `token=` param) → HTTP 403 invalid token; failures were logged and skipped | Fixed properties must use a normal `&` between `key` and `token`. Code now decodes `&amp;` on read. Use **Test Chat webhooks** to confirm every space returns OK |
+| Only PRJ_VOX gets Chat posts. Other spaces stay silent. Executions still show Completed. | The stored webhook used `&amp;` in place of `&`. Chat then returned HTTP 403. The script logged the failure and continued. | Store a normal `&` between `key` and `token`. The script also decodes `&amp;` on read. Run **Test Chat webhooks** and check that every space returns OK. |
 | Consent loop every week | Script moved to standard GCP Testing | Stop. See ADR-001 |
 | `getUi()` error in Executions | Headless run called alert / `onOpen` | Run `provisionRosterSpacesAndSheets` or `*_` trigger helpers |
 
@@ -623,7 +961,16 @@ Meeting conversations are excluded. All nine have Script Property webhooks; Conf
 | surya@arcaai.com | `<users/114773095626200612235>` |
 | tap@arcaai.com | `<users/114622970193957514150>` |
 | vidit@arcaai.com | `<users/116156027267557744097>` |
+| sanjali@arcaai.com | `<users/102782063229755317329>` |
 
 ### 18.3 Historical roster note
 
-Production Team has 17 roster emails. Unused personal tab `Najmunneesa MC` may remain; do not delete unless asked. Early short names (Rijna, Tap, Josekutty, Jayaram) were renamed to full names with history kept on the same tab.
+Production Team has 18 roster emails.
+Konduka Sanjali (`sanjali@arcaai.com`) is on Team.
+Her personal tab name is `Konduka Sanjali`.
+Her Space value for current rows is `PRJ_VOX`.
+The unused tab `Najmunneesa MC` may remain.
+Do not delete that tab unless asked.
+Early short names were renamed to full names.
+Those names are Rijna, Tap, Josekutty, and Jayaram.
+History stayed on the same tab.

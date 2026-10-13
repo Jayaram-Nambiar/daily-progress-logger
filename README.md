@@ -70,7 +70,7 @@ Three schedules are installed in Asia/Kolkata by default after **Apply schedules
 |---|---|---|
 | Weekdays ~6:00 PM | `sendReminder_trigger` | For each space, pings members whose **Reminder Matrix** cell is checked and who have no today summary for that space. Includes the workbook URL. One email per person lists every space they are missing. |
 | Weekdays ~7:00 PM | `postDailyUpdatesToChat_trigger` | Posts today's rows, split by the Space column, to each space whose Script Property webhook is set |
-| Monday ~9:00 AM | `weeklyRollup_trigger` | Writes **Weekly Rollup**, then posts **summary-only** to each space with a webhook. Uses OpenRouter free models when `OPENROUTER_API_KEY` is set (`gemma-4-31b-it:free`, then `gemma-4-26b-a4b-it:free`, then `openrouter/free`). The prompt uses member names and `[YYYY-MM-DD]` tags and asks for a short synthesis. If both models fail, posts that space's member week text as-is. |
+| Monday ~9:00 AM | `weeklyRollup_trigger` | Writes **Weekly Rollup**, then posts one summary to each space with a webhook. Uses OpenRouter free models when `OPENROUTER_API_KEY` is set (`gemma-4-31b-it:free`, then `gemma-4-26b-a4b-it:free`, then `openrouter/free`). The prompt uses member names and `[YYYY-MM-DD]` tags and asks for one bullet per member. A member the model omits is appended. If every model fails, the post is that space's member week text. |
 
 Team column **E Spaces** lists which Chat spaces each member belongs to (multi-select chips). Fill it from Chat, then run **Apply Team spaces to reminder matrix**. Non-member matrix cells become blank. The script never calls the Chat API.
 

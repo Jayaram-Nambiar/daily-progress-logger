@@ -13,11 +13,11 @@
  * Chat column: <users/USER_ID> to ping that person. Blank shows *Name*.
  * Spaces column: multi-select chip dropdown from Chat Spaces!A2:A.
  * Menu "Apply Team spaces to reminder matrix" applies column E to the matrix.
- * Monday weekly posts may send an OpenRouter summary-only message per
- * configured webhook space when OPENROUTER_API_KEY is set. Failures fall
- * back to the member detail text. Default models:
+ * Monday weekly posts may send an OpenRouter summary per configured
+ * webhook space when OPENROUTER_API_KEY is set. The summary must name
+ * every member who had updates. A member the model omits is appended.
+ * If every model fails, the post is that space's member text. Default models:
  * google/gemma-4-31b-it:free then google/gemma-4-26b-a4b-it:free, then openrouter/free.
- * Final fallback: post the space's member week text unchanged.
  * The script never calls the Google Chat API and stays on the default GCP project.
  * Webhook URLs and API keys are Script Properties, not source.
  *******************************************************/
@@ -230,7 +230,8 @@ const ROSTER = [
   ['Shibu Ignatious', 'dr.shibu@arcaai.com'],
   ['Surya Prakash', 'surya@arcaai.com'],
   ['Tap Do Huy Huynh', 'tap@arcaai.com'],
-  ['Vidit Khairkar', 'vidit@arcaai.com']
+  ['Vidit Khairkar', 'vidit@arcaai.com'],
+  ['Konduka Sanjali', 'sanjali@arcaai.com']
 ];
 
 const SPACE_ROWS = [
@@ -309,7 +310,8 @@ const CHAT_USER_IDS = {
   'dr.shibu@arcaai.com': '106177154370554184641',
   'surya@arcaai.com': '114773095626200612235',
   'tap@arcaai.com': '114622970193957514150',
-  'vidit@arcaai.com': '116156027267557744097'
+  'vidit@arcaai.com': '116156027267557744097',
+  'sanjali@arcaai.com': '102782063229755317329'
 };
 
 function fillChatMentions_() {
@@ -1435,7 +1437,7 @@ function setOpenRouterApiKey() {
   }
   ui.alert(
     'Saved OPENROUTER_API_KEY and free-tier models (' + DEFAULT_OPENROUTER_MODELS +
-      '). Monday weekly posts send a summary-only message per configured space; member detail is the final fallback.'
+      '). Monday weekly posts send one summary per configured space. A member the model omits is appended. If every model fails, the post is that space\'s member text.'
   );
 }
 
