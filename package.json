@@ -4,8 +4,8 @@
   "private": true,
   "description": "Local clasp workspace for the Daily Progress Logger spreadsheet-bound Apps Script.",
   "scripts": {
-    "pull": "clasp pull",
-    "push": "clasp push",
+    "pull": "clasp --auth .clasprc.json --user arca pull",
+    "push": "clasp --auth .clasprc.json --user arca push",
     "test": "node --test test/logic.test.js"
   },
   "devDependencies": {
