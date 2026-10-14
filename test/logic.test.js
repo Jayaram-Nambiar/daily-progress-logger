@@ -323,4 +323,149 @@ assert.strictEqual(
   'google/gemma-4-31b-it:free|openrouter/free'
 );
 
+assert.strictEqual(Logic.cellText('#REF!'), '');
+assert.strictEqual(Logic.cellText('#N/A'), '');
+assert.strictEqual(Logic.cellText('  shipped login  '), 'shipped login');
+
+const safeRows = Logic.collectSafe(
+  ['good', '#REF!', 'also good'],
+  function (item) {
+    if (item === '#REF!') throw new Error('bad cell');
+    return item;
+  }
+);
+assert.strictEqual(safeRows.values.join('|'), 'good|also good');
+assert.strictEqual(safeRows.skipped, 1);
+
+const hope8 = 'https://github.com/arcaai/project-hope/issues/8';
+const hope9 = 'https://github.com/arcaai/project-hope/issues/9';
+
+const pageIssue = Logic.planGithubIssueCell(
+  'https://github.com/ArcaAI/project-hope/issues/08',
+  []
+);
+assert.strictEqual(pageIssue.rewrite, true);
+assert.strictEqual(pageIssue.display, '8');
+assert.strictEqual(JSON.stringify(pageIssue.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const decorated = Logic.planGithubIssueCell(
+  'http://www.github.com/ArcaAI/project-hope/issues/8/?utm=1#issuecomment-5',
+  []
+);
+assert.strictEqual(JSON.stringify(decorated.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const bareHost = Logic.planGithubIssueCell('github.com/ArcaAI/project-hope/issues/9.', []);
+assert.strictEqual(JSON.stringify(bareHost.issues), JSON.stringify([{ number: '9', url: hope9 }]));
+
+const notGithub = Logic.planGithubIssueCell('https://notgithub.com/ArcaAI/project-hope/issues/8', []);
+assert.strictEqual(JSON.stringify(notGithub.issues), '[]');
+assert.strictEqual(notGithub.rewrite, false);
+
+const blankIssues = Logic.planGithubIssueCell('', []);
+assert.strictEqual(JSON.stringify(blankIssues.issues), '[]');
+assert.strictEqual(blankIssues.rewrite, false);
+assert.strictEqual(blankIssues.display, '');
+
+const typedNote = Logic.planGithubIssueCell('no issue for this row', []);
+assert.strictEqual(typedNote.rewrite, false);
+assert.strictEqual(JSON.stringify(typedNote.issues), '[]');
+
+const alreadyLinked = Logic.planGithubIssueCell('8, 9', [hope8, hope9]);
+assert.strictEqual(alreadyLinked.rewrite, false);
+assert.strictEqual(alreadyLinked.display, '8, 9');
+assert.strictEqual(JSON.stringify(alreadyLinked.issues), JSON.stringify([
+  { number: '8', url: hope8 },
+  { number: '9', url: hope9 }
+]));
+
+const rawPair = Logic.planGithubIssueCell(
+  'https://github.com/ArcaAI/project-hope/issues/8, https://github.com/ArcaAI/project-hope/issues/8',
+  []
+);
+assert.strictEqual(JSON.stringify(rawPair.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const pane = 'https://github.com/orgs/ArcaAI/projects/10/views/3?pane=issue&itemId=256599110&issue=ArcaAI%7Cproject-hope%7C8';
+const paneIssue = Logic.planGithubIssueCell(pane, []);
+assert.strictEqual(JSON.stringify(paneIssue.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+assert.strictEqual(paneIssue.display, '8');
+
+const literalPipe = Logic.planGithubIssueCell(
+  'https://github.com/users/octocat/projects/1?issue=ArcaAI|project-hope|9',
+  []
+);
+assert.strictEqual(JSON.stringify(literalPipe.issues), JSON.stringify([{ number: '9', url: hope9 }]));
+
+const lowerEncoded = Logic.planGithubIssueCell(
+  'https://github.com/orgs/ArcaAI/projects/10?issue=ArcaAI%7cproject-hope%7c8',
+  []
+);
+assert.strictEqual(JSON.stringify(lowerEncoded.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const pathAndParam = Logic.planGithubIssueCell(
+  'https://github.com/ArcaAI/project-hope/issues/8?issue=ArcaAI%7Cproject-hope%7C8',
+  []
+);
+assert.strictEqual(JSON.stringify(pathAndParam.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const bothShapes = Logic.planGithubIssueCell(
+  pane + '\n' + 'https://github.com/ArcaAI/project-hope/issues/8',
+  []
+);
+assert.strictEqual(JSON.stringify(bothShapes.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+
+const itemOnly = Logic.planGithubIssueCell(
+  'https://github.com/orgs/airbytehq/projects/37/views/1?itemId=26937554&pane=issue',
+  []
+);
+assert.strictEqual(JSON.stringify(itemOnly.issues), '[]');
+assert.strictEqual(itemOnly.rewrite, false);
+
+const pullPath = Logic.planGithubIssueCell('https://github.com/ArcaAI/project-hope/pull/8', []);
+assert.strictEqual(JSON.stringify(pullPath.issues), '[]');
+
+const mixedDelimiters = Logic.planGithubIssueCell(
+  'https://github.com/ArcaAI/project-hope/issues/8; https://github.com/Other/widget/issues/8\nhttps://github.com/ArcaAI/project-hope/issues/9 | https://github.com/ArcaAI/project-hope/issues/9',
+  []
+);
+assert.strictEqual(JSON.stringify(mixedDelimiters.issues), JSON.stringify([
+  { number: '8', url: hope8 },
+  { number: '8', url: 'https://github.com/other/widget/issues/8' },
+  { number: '9', url: hope9 }
+]));
+assert.strictEqual(mixedDelimiters.display, '8, 8, 9');
+
+const mixedNote = Logic.planGithubIssueCell('see ' + pane + ' thanks', []);
+assert.strictEqual(JSON.stringify(mixedNote.issues), JSON.stringify([{ number: '8', url: hope8 }]));
+assert.strictEqual(mixedNote.rewrite, true);
+assert.strictEqual(mixedNote.display, '8');
+
+const appended = Logic.planGithubIssueCell(
+  '8, https://github.com/ArcaAI/project-hope/issues/9',
+  [hope8]
+);
+assert.strictEqual(appended.display, '8, 9');
+assert.strictEqual(appended.rewrite, true);
+
+assert.strictEqual(
+  Logic.formatDailyUpdateLine('shipped the parser', '2', 'staging', [hope8, hope9]),
+  '– shipped the parser (2h) • Blockers: staging • Issues: ' + hope8 + ', ' + hope9
+);
+assert.strictEqual(
+  Logic.formatDailyUpdateLine('shipped the parser', '2', 'staging', []),
+  '– shipped the parser (2h) • Blockers: staging'
+);
+assert.strictEqual(
+  Logic.formatDailyUpdateLine('shipped the parser', '', '', [hope8]),
+  '– shipped the parser • Issues: ' + hope8
+);
+assert.strictEqual(
+  Logic.formatWeeklyEntryLine('Mon, Sep 14', 'shipped login', '2', 'staging'),
+  '• Mon, Sep 14: shipped login (2h) — Blockers: staging'
+);
+assert.strictEqual(Logic.formatWeeklyEntryLine('Mon, Sep 14', 'shipped login', '', '').indexOf('Issues:'), -1);
+assert.strictEqual(JSON.stringify(Logic.datesInRange('2026-10-05', '2026-10-11')), JSON.stringify([
+  '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11'
+]));
+assert.strictEqual(JSON.stringify(Logic.datesInRange('2026-10-11', '2026-10-05')), '[]');
+
 console.log('logic.test.js passed');

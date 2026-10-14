@@ -456,5 +456,173 @@ var Logic = {
         { role: 'user', content: userPrompt }
       ]
     };
+  },
+
+  isSpreadsheetError: function (val) {
+    return /^#(REF!|N\/A|ERROR!|VALUE!|DIV\/0!|NAME\?|NULL!|NUM!)$/.test(String(val == null ? '' : val).trim());
+  },
+
+  cellText: function (val) {
+    if (val == null || Logic.isSpreadsheetError(val)) return '';
+    return String(val).trim();
+  },
+
+  githubIssueNumber_: function (raw) {
+    var text = String(raw || '').trim();
+    if (!/^\d{1,10}$/.test(text)) return '';
+    var number = String(parseInt(text, 10));
+    if (!number || number === '0') return '';
+    return number;
+  },
+
+  githubOwner_: function (raw) {
+    var text = String(raw || '');
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(text)) return '';
+    return text.toLowerCase();
+  },
+
+  githubRepo_: function (raw) {
+    var text = String(raw || '');
+    if (text === '.' || text === '..') return '';
+    if (!/^[A-Za-z0-9._-]{1,100}$/.test(text)) return '';
+    return text.toLowerCase();
+  },
+
+  canonicalGithubIssue_: function (owner, repo, number) {
+    var safeOwner = Logic.githubOwner_(owner);
+    var safeRepo = Logic.githubRepo_(repo);
+    var safeNumber = Logic.githubIssueNumber_(number);
+    if (!safeOwner || !safeRepo || !safeNumber) return null;
+    return {
+      number: safeNumber,
+      url: 'https://github.com/' + safeOwner + '/' + safeRepo + '/issues/' + safeNumber
+    };
+  },
+
+  githubIssuesFromText_: function (text) {
+    var source = String(text || '');
+    var host = '(?:https?:\\/\\/(?:www\\.)?|(?:^|[^A-Za-z0-9.])(?:www\\.)?)github\\.com\\/';
+    var found = [];
+    var match;
+    var pathRe = new RegExp(
+      host + '([^\\/\\s?#]+)\\/([^\\/\\s?#]+)\\/issues\\/(\\d{1,10})(?![A-Za-z0-9])',
+      'gi'
+    );
+    while ((match = pathRe.exec(source))) {
+      var pathIssue = Logic.canonicalGithubIssue_(match[1], match[2], match[3]);
+      if (pathIssue) found.push({ index: match.index, issue: pathIssue });
+    }
+    var paramRe = new RegExp(
+      host + '[^\\s<>"\']*?[?&]issue=([A-Za-z0-9._-]+(?:%7C|\\|)[A-Za-z0-9._-]+(?:%7C|\\|)\\d{1,10})',
+      'gi'
+    );
+    while ((match = paramRe.exec(source))) {
+      var decoded = match[1];
+      try {
+        decoded = decodeURIComponent(match[1]);
+      } catch (e) {
+        decoded = match[1];
+      }
+      var parts = decoded.split('|');
+      if (parts.length !== 3) continue;
+      var paramIssue = Logic.canonicalGithubIssue_(parts[0], parts[1], parts[2]);
+      if (paramIssue) found.push({ index: match.index, issue: paramIssue });
+    }
+    found.sort(function (a, b) { return a.index - b.index; });
+    var seen = {};
+    var issues = [];
+    found.forEach(function (item) {
+      if (seen[item.issue.url]) return;
+      seen[item.issue.url] = true;
+      issues.push(item.issue);
+    });
+    return issues;
+  },
+
+  planGithubIssueCell: function (text, linkUrls) {
+    var fromLinks = [];
+    (linkUrls || []).forEach(function (url) {
+      Logic.githubIssuesFromText_(url).forEach(function (issue) {
+        fromLinks.push(issue);
+      });
+    });
+    var fromText = Logic.githubIssuesFromText_(text);
+    var seen = {};
+    var issues = [];
+    function add(list) {
+      list.forEach(function (issue) {
+        if (!issue || seen[issue.url]) return;
+        seen[issue.url] = true;
+        issues.push(issue);
+      });
+    }
+    add(fromLinks);
+    add(fromText);
+    var display = issues.map(function (issue) { return issue.number; }).join(', ');
+    var currentLinks = [];
+    (linkUrls || []).forEach(function (url) {
+      Logic.githubIssuesFromText_(url).forEach(function (issue) {
+        if (currentLinks.indexOf(issue.url) === -1) currentLinks.push(issue.url);
+      });
+    });
+    var sameLinks = currentLinks.length === issues.length && currentLinks.every(function (url, index) {
+      return url === issues[index].url;
+    });
+    var rewrite = issues.length > 0 && !(String(text || '') === display && sameLinks);
+    return { issues: issues, display: display, rewrite: rewrite };
+  },
+
+  formatDailyUpdateLine: function (summary, hoursText, blockers, issueUrls) {
+    var line = '– ' + String(summary || '');
+    var hours = String(hoursText || '').trim();
+    if (hours) line += ' (' + hours + 'h)';
+    var blocks = String(blockers || '').trim();
+    if (blocks) line += ' • Blockers: ' + blocks;
+    var urls = [];
+    (issueUrls || []).forEach(function (url) {
+      var cleaned = String(url || '').trim();
+      if (cleaned) urls.push(cleaned);
+    });
+    if (urls.length) line += ' • Issues: ' + urls.join(', ');
+    return line;
+  },
+
+  formatWeeklyEntryLine: function (prettyDate, summary, hoursText, blockers) {
+    var parts = ['• ' + String(prettyDate || '') + ': ' + String(summary || '')];
+    var hours = String(hoursText || '').trim();
+    if (hours) parts.push('(' + hours + 'h)');
+    var blocks = String(blockers || '').trim();
+    if (blocks) parts.push('— Blockers: ' + blocks);
+    return parts.join(' ');
+  },
+
+  datesInRange: function (startYmd, endYmd) {
+    var start = String(startYmd || '');
+    var end = String(endYmd || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return [];
+    var out = [];
+    var cursor = start;
+    while (cursor <= end) {
+      out.push(cursor);
+      cursor = Logic.shiftYmd_(cursor, 1);
+    }
+    return out;
+  },
+
+  /**
+   * Runs fn on each item. A throw skips that item and leaves the others.
+   */
+  collectSafe: function (items, fn) {
+    var values = [];
+    var skipped = 0;
+    (items || []).forEach(function (item, index) {
+      try {
+        var value = fn(item, index);
+        if (value !== undefined && value !== null) values.push(value);
+      } catch (e) {
+        skipped++;
+      }
+    });
+    return { values: values, skipped: skipped };
   }
 };

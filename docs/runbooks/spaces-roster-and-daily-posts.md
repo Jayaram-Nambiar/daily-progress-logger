@@ -41,15 +41,16 @@ Agents and developers should also read [AGENTS.md](../../AGENTS.md) and [ADR-001
 
 ## 1. What this system does
 
-Each team member has a personal tab in the spreadsheet. They log a daily row (date, summary, hours, blockers, tomorrow’s plan) and pick a **Space** from a dropdown.
+Each team member has a personal tab in the spreadsheet. They log a daily row (date, summary, hours, blockers, tomorrow’s plan, and an optional GitHub issue cell) and pick a **Space** from a dropdown.
 
 On a schedule (Asia/Kolkata):
 
 | When (default) | What happens |
 |---|---|
 | Weekdays ~18:00 | Reminder in each Chat space for people who are checked on the Reminder Matrix and have not logged today for that space. Also one email per person listing spaces they still owe. |
-| Weekdays ~19:00 | Today’s rows are posted to Google Chat, split by the Space column (only spaces with a webhook). |
-| Monday ~09:00 | The script writes the previous Monday–Sunday week to **Weekly Rollup**. Each space with a webhook gets one summary. The script appends any member the model omits. If every model fails, that space gets the member week text. |
+| Weekdays ~19:00 | Today’s rows are posted to Google Chat, split by the Space column (only spaces with a webhook). Recognized GitHub issue URLs are included on the summary line. |
+| Every hour | Today’s **GitHub Issues** cells are rewritten to linked issue numbers. This does not post to Chat. The 19:00 post and the Monday roll-up format again before they read the sheet. |
+| Monday ~09:00 | The script writes the previous Monday–Sunday week to **Weekly Rollup**. Each space with a webhook gets one summary. The script appends any member the model omits. If every model fails, that space gets the member week text. Last week’s GitHub issue cells are formatted first. Those URLs are not part of the Monday message. |
 
 The script never calls the Google Chat API. It posts only through **incoming webhooks** stored as Script Properties. Slack code exists but does not send (`SLACK_ENABLED = false`).
 
@@ -253,11 +254,14 @@ Apps Script only accepts minutes **0, 15, 30, 45**, and may start up to ~15 minu
 | Disable one job | Uncheck Enabled on that row → **Apply schedules from sheet** |
 | Remove old Slack 20:30 trigger | Slack-only cleanup (Apply schedules from sheet also deletes the old Slack trigger) |
 
-Check: **Extensions → Apps Script → Triggers** (clock icon) lists the expected handlers in Asia/Kolkata.
+**Apply schedules from sheet** also installs `formatGithubIssues_trigger` to run every hour. That job is not a row on the Schedules sheet. Apply deletes the previous copy of that same trigger before it creates a new one.
+
+Check: **Extensions → Apps Script → Triggers** (clock icon) lists the expected handlers in Asia/Kolkata. The hourly GitHub issue trigger is in that list after you apply schedules.
 
 ### 7.3 Run jobs immediately (ignore day list)
 
 - **Post today's updates now**
+- **Format today’s GitHub issues**
 - **Send reminders now**
 - **Run weekly roll-up now**
 - **Apply Team spaces to reminder matrix**
@@ -358,10 +362,13 @@ Log the row before 19:00 Asia/Kolkata on a weekday.
 3. Add one row for today.
 4. Set Date to today.
 5. Write a Summary.
-6. Hours, Blockers, and Tomorrow Plan are optional.
-7. Set Space from the dropdown.
-8. Use the exact Chat space name.
-9. Leave the row saved before 19:00.
+6. Hours, Blockers, Tomorrow Plan, and GitHub Issues are optional.
+7. To attach GitHub issues, paste one or more issue URLs into **GitHub Issues**. Separate them with a comma, a space, a new line, a semicolon, or a pipe. Leave the cell blank when the work has no GitHub issue.
+8. Use an issue-page URL such as `https://github.com/owner/repo/issues/123`, or a project-board URL that contains `issue=owner|repo|123` (the `|` may be written as `%7C`). A project link that only has `itemId` is left as pasted.
+9. Recognized URLs become the issue numbers, each linked to the issue. Hover the **GitHub Issues** header for the same instructions.
+10. Set Space from the dropdown.
+11. Use the exact Chat space name.
+12. Leave the row saved before 19:00.
 
 The 19:00 job reads Team. Then it reads each personal tab.
 It keeps a row only when all three are true.
@@ -369,6 +376,8 @@ It keeps a row only when all three are true.
 - Date is today in Asia/Kolkata.
 - Summary is not empty.
 - Space equals the Chat space name.
+
+A blank **GitHub Issues** cell still posts. When the cell has recognized issue URLs, the daily Chat line adds `Issues:` and those full URLs after blockers. The Monday roll-up formats last week’s issue cells and does not put those URLs in the Monday Chat message.
 
 A blank Space posts to no space.
 A row saved after 19:00 waits for the next weekday.
@@ -612,12 +621,39 @@ The job does not call OpenRouter.
 The keep test in `postDailyUpdatesToChat_` is:
 
 ```javascript
-if (rowDate !== today || !summary || !spaceName) return;
+if (item.date !== today || !item.summary || !item.space) return;
 ```
 
 `today` is the script date in Asia/Kolkata.
-`summary` is the trimmed Summary cell.
-`spaceName` is the trimmed Space cell.
+`item.summary` is the trimmed Summary cell.
+`item.space` is the trimmed Space cell.
+A blank GitHub Issues value does not remove the row.
+
+The daily summary line can also end with ` • Issues: ` and the canonical GitHub URLs. A blank issue cell leaves the line unchanged.
+
+### 11.6a Format today’s GitHub issues
+
+Function: `formatTodaysGithubIssues`.
+
+This item rewrites today’s **GitHub Issues** cells on every member tab.
+It does not post to Chat.
+
+1. Open the member tab.
+2. Paste GitHub issue URLs into **GitHub Issues**, or leave the cell blank.
+3. Click **Format today’s GitHub issues**.
+4. Read the alert. It counts member sheets, not issue links.
+
+Recognized cells show the issue numbers, separated by commas, and each number is a link.
+A blank cell stays blank.
+Text that is not a GitHub issue URL stays as typed.
+The same rewrite runs every hour, again at the start of **Post today’s updates now**, and for the previous Monday–Sunday week at the start of **Run weekly roll-up now**.
+
+An issue page looks like `https://github.com/ArcaAI/project-hope/issues/8`.
+A project-board link also counts when its query contains `issue=ArcaAI|project-hope|8` or the `%7C` encoding of those pipes.
+Both become `https://github.com/arcaai/project-hope/issues/8`.
+Separate several URLs with a comma, a space, a new line, a semicolon, or a pipe.
+A project link that only contains `itemId` stays as pasted, because it does not include the repository or the issue number.
+The same instructions sit in the note on the **GitHub Issues** header. Hover that header in the sheet.
 
 ### 11.7 Send reminders now
 
@@ -800,9 +836,10 @@ See [§6.1](#61-team-columns). Header frozen. Do not `clear()` the sheet.
 | D | Blockers | Included in daily / weekly member text |
 | E | Tomorrow Plan | Daily Chat only. The weekly roll-up omits this column. |
 | F | Space | Dropdown from Chat Spaces. Blank → nowhere |
+| G | GitHub Issues | Optional. Paste GitHub issue URLs. Separate several URLs with a comma, space, new line, semicolon, or pipe. The formatter stores linked issue numbers. Blank is a normal row. Hover the header for the accepted URL shapes. |
 
-Do not insert Space between columns A and E.
-`syncOneMember_` reads columns by position.
+Do not insert a column before Space or before GitHub Issues. Space stays column F. GitHub Issues stays column G.
+`syncOneMember_` reads columns by position. **Add or update member**, **Sync member sheets**, and **Bootstrap roster, spaces & sheets** all call it, so a new personal tab is created with this column and its header note.
 
 ### Reminder Matrix / Schedules / Weekly Rollup / Weekly Space Summaries
 
@@ -820,6 +857,10 @@ Keep a member row only when:
 2. Summary is non-empty
 3. Space equals that Chat Spaces name. The match is case-sensitive. Use the dropdown.
 
+GitHub issues are optional. They do not decide whether the row posts.
+When the cell has recognized issues, the summary line gains ` • Issues: ` and the canonical `https://github.com/<owner>/<repo>/issues/<number>` URLs after blockers.
+A blank issue cell leaves that line unchanged.
+
 If nobody matches, that space gets **no** message (no “no updates” spam).
 
 ### Reminder (per space)
@@ -829,6 +870,8 @@ Matrix cell checked **and** no qualifying today row for that space → include i
 ### Weekly roll-up
 
 The week is the previous Monday through Sunday in Asia/Kolkata.
+Before it collates, the roll-up formats **GitHub Issues** for every row dated in that week.
+Those URLs are not added to the weekly Chat message or the OpenRouter prompt.
 The script uses the same Summary and Space rules as the daily post.
 The date must fall in that week.
 The script writes **Weekly Rollup**.
@@ -842,7 +885,7 @@ The sheet rows for that space are still saved.
 
 ## 14. Weekly roll-up and LLM behavior
 
-1. Collate the previous week per member per space. Member text uses a readable date. The model input uses an ISO date.
+1. Format last week’s **GitHub Issues** cells, then collate the previous week per member per space. Member text uses a readable date and does not include issue URLs. The model input uses an ISO date and also does not include issue URLs.
 2. Upsert **Weekly Rollup** (`weekStart|space|member`).
 3. For each space with a webhook:
    - If OpenRouter enabled and no stored summary → call free models in order with dated prompt.
@@ -889,7 +932,7 @@ The request `max_tokens` value is 1200.
 |---|---|---|
 | Two tabs for one person | A rename created a second tab | Copy rows to the tab that has history. Delete the empty duplicate. |
 | Hours or Blockers look swapped | Space was inserted before column F | Move Space to column F. Restore headers A through E. |
-| Everyone posted into PRJ_VOX | Blank Space was treated as every space, or Space is the wrong column | A blank Space must stay out of every post. Space is column F. |
+| Everyone posted into PRJ_VOX | Blank Space was treated as every space, or Space is the wrong column | A blank Space must stay out of every post. Space is column F. GitHub Issues is column G. |
 | Wrong space gets rows | Shared webhook or skipped Space compare | One webhook per space; Space must equal destination name |
 | Reminder includes an unchecked person | The matrix is stale, or the cell is not a real checkbox | Run **Sync reminder matrix**. A reminder requires the cell to be exactly true. |
 | Matrix still shows non-member checkboxes | Column E empty or **Apply Team spaces to reminder matrix** not run | Fill E → **Apply Team spaces to reminder matrix** |
@@ -903,7 +946,8 @@ The request `max_tokens` value is 1200.
 | Monday Chat omits a member who is on Weekly Rollup | The model summary left that name out | Current code appends that member's week text under the summary. The stored LLM cell can still omit the name. |
 | OpenRouter HTTP 404 on llama-3.3, deepseek-v4-flash, or qwen3.8-27b `:free` | Those free ids were removed from the catalog | Current code skips them and calls `openrouter/free` last. **Set OpenRouter API key** stores the new defaults |
 | OpenRouter HTTP 402 / paid model | Non-free id in property | **Set OpenRouter API key** to reset the free list. Paid ids are ignored |
-| No daily Chat post, Executions **Failed** after several minutes with "a server error occurred" | Daily post read every member sheet once per space | Current code reads each sheet once, then posts. A single sheet that still throws is logged and skipped |
+| One bad cell stops a member, or stops the daily or weekly Chat post | A formula error such as `#REF!` made the whole sheet read throw | The job reads columns A through G. A bad data cell skips that row. A bad GitHub Issues cell skips that cell and logs the sheet name and row number. Other rows, other members, the roll-up, and the other Chat posts continue |
+| GitHub Issues still shows a long URL | The URL is not a recognized issue link, the date is not in the format pass, or Apply schedules has not installed the hourly trigger | Use an issue-page URL or a project URL that contains `issue=owner|repo|number`. Separate several URLs with a comma, space, new line, semicolon, or pipe. Run **Format today’s GitHub issues** for today. Run **Apply schedules from sheet** once so the hourly trigger exists. Monday’s roll-up formats the previous week. |
 | Only PRJ_VOX gets Chat posts. Other spaces stay silent. Executions still show Completed. | The stored webhook used `&amp;` in place of `&`. Chat then returned HTTP 403. The script logged the failure and continued. | Store a normal `&` between `key` and `token`. The script also decodes `&amp;` on read. Run **Test Chat webhooks** and check that every space returns OK. |
 | Consent loop every week | Script moved to standard GCP Testing | Stop. See ADR-001 |
 | `getUi()` error in Executions | Headless run called alert / `onOpen` | Run `provisionRosterSpacesAndSheets` or `*_` trigger helpers |

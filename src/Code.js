@@ -5,10 +5,12 @@
  * Team: Name | Slack | Email | Chat | Spaces
  * Reminder Matrix: Member | one checkbox column per Chat space
  * Chat Spaces: Space | Space id | Webhook property | Configured
- * Per-member tabs: Date | Summary | Hours | Blockers | Tomorrow Plan | Space
+ * Per-member tabs: Date | Summary | Hours | Blockers | Tomorrow Plan | Space | GitHub Issues
  * Weekly Rollup: Week Start | Week End | Space | Member | Weekly Summary
  * Weekly Space Summaries: Week Start | Week End | Space | LLM Summary
  * Schedules: Reminder | Daily post | Weekly roll-up | Space access
+ * GitHub Issues is optional. An hourly trigger formats today's cells.
+ * The daily post formats today again. Monday's roll-up formats the previous week.
  *
  * Chat column: <users/USER_ID> to ping that person. Blank shows *Name*.
  * Spaces column: multi-select chip dropdown from Chat Spaces!A2:A.
@@ -57,7 +59,7 @@ const SCHEDULE_HANDLERS = {
   'Space access': 'refreshSpaceAccess_trigger'
 };
 
-const MEMBER_HEADERS = ['Date', 'Summary', 'Hours', 'Blockers', 'Tomorrow Plan', 'Space'];
+const MEMBER_HEADERS = ['Date', 'Summary', 'Hours', 'Blockers', 'Tomorrow Plan', 'Space', 'GitHub Issues'];
 const SPACE_HEADERS = ['Space', 'Space id', 'Webhook property', 'Configured'];
 const WEEKLY_HEADERS = ['Week Start', 'Week End', 'Space', 'Member', 'Weekly Summary'];
 const WEEKLY_AI_HEADERS = ['Week Start', 'Week End', 'Space', 'LLM Summary'];
@@ -82,7 +84,17 @@ const HEADER_NOTES = {
     'Planned focus next day. Keep concise.',
   'Space':
     'Project space that should receive this row. Pick from the list. ' +
-    'A blank Space is not posted to any Google Chat space.'
+    'A blank Space is not posted to any Google Chat space.',
+  'GitHub Issues':
+    'Optional. Leave blank when this row has no GitHub issue.\n' +
+    'Paste full GitHub issue URLs:\n' +
+    '• Issue page: https://github.com/owner/repo/issues/123\n' +
+    '• Project board: a github.com link that contains issue=owner|repo|123\n' +
+    '  (the | may be written as %7C).\n' +
+    'Separate multiple URLs with a comma, a space, a new line, a semicolon, or a pipe.\n' +
+    'Example: https://github.com/ArcaAI/project-hope/issues/8, https://github.com/ArcaAI/project-hope/issues/9\n' +
+    'Recognized URLs are rewritten to the issue numbers, each linked to the issue.\n' +
+    'A project link that only has itemId is left as typed.'
 };
 
 /* -------------------- Menus -------------------- */
@@ -96,6 +108,7 @@ function onOpen() {
     .addItem('Set Chat webhook…', 'setGoogleChatWebhookForSpace')
     .addItem('Test Chat webhooks', 'testAllGoogleChatWebhooks')
     .addItem('Post today’s updates now', 'postDailyUpdatesToChat')
+    .addItem('Format today’s GitHub issues', 'formatTodaysGithubIssues')
     .addItem('Send reminders now', 'sendReminderNow')
     .addItem('Run weekly roll-up now', 'runWeeklyRollupNow')
     .addSeparator()
@@ -198,7 +211,7 @@ function syncOneMember_(name) {
     const have = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), want.length)).getValues()[0];
     want.forEach((h, i) => {
       if ((have[i] || '').toString().trim() !== h) {
-        sh.getRange(1, i + 1).setValue(h);
+        sh.getRange(1, i + 1).setValue(h).setFontWeight('bold');
       }
     });
   }
@@ -208,9 +221,133 @@ function syncOneMember_(name) {
   applyTableLook_(sh, MEMBER_HEADERS.length);
   safeSetNumberFormat_(sh, 'A2:A', 'yyyy-mm-dd');
   sh.getRange('B2:B').setWrap(true);
+  const issueCol = MEMBER_HEADERS.indexOf('GitHub Issues') + 1;
+  sh.getRange(2, issueCol, Math.max(sh.getMaxRows() - 1, 1), 1).setWrap(true);
   MEMBER_HEADERS.forEach((h, i) => sh.getRange(1, i + 1).setNote(HEADER_NOTES[h] || ''));
   applySpaceDropdown_(sh);
   autoResize_(sh);
+}
+
+function ensureMemberIssueColumn_(sh) {
+  const header = 'GitHub Issues';
+  const col = MEMBER_HEADERS.indexOf(header) + 1;
+  const current = String(sh.getRange(1, col).getValue() || '').trim();
+  const missingHeader = current !== header;
+  if (missingHeader) sh.getRange(1, col).setValue(header).setFontWeight('bold');
+  sh.getRange(1, col).setNote(HEADER_NOTES[header] || '');
+  sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1).setWrap(true);
+  if (missingHeader) applyTableLook_(sh, MEMBER_HEADERS.length);
+}
+
+function writeGithubIssueCell_(range, plan) {
+  const builder = SpreadsheetApp.newRichTextValue().setText(plan.display);
+  let cursor = 0;
+  plan.issues.forEach((issue, index) => {
+    if (index > 0) cursor += 2;
+    const start = cursor;
+    const end = start + String(issue.number).length;
+    builder.setLinkUrl(start, end, issue.url);
+    cursor = end;
+  });
+  range.setRichTextValue(builder.build());
+}
+
+function formatGithubIssuesOnSheet_(sh, ymdSet) {
+  if (!sh) return;
+  try {
+    ensureMemberIssueColumn_(sh);
+  } catch (e) {
+    console.error(sh.getName() + ' GitHub issues header skipped: ' + errorMessage_(e));
+    return;
+  }
+  if (sh.getLastRow() < 2) return;
+  const col = MEMBER_HEADERS.indexOf('GitHub Issues') + 1;
+  const height = sh.getLastRow() - 1;
+  let dates;
+  let rich;
+  let formulas;
+  try {
+    dates = sh.getRange(2, 1, height, 1).getValues();
+    rich = sh.getRange(2, col, height, 1).getRichTextValues();
+    formulas = sh.getRange(2, col, height, 1).getFormulas();
+  } catch (e) {
+    console.error(sh.getName() + ' GitHub issues skipped: ' + errorMessage_(e));
+    return;
+  }
+  for (let i = 0; i < dates.length; i++) {
+    const rowNumber = i + 2;
+    if (formulas[i][0]) continue;
+    const ymd = normalizeDateOnly_(dates[i][0]);
+    if (!ymd || !ymdSet[ymd]) continue;
+    try {
+      const cell = rich[i][0];
+      const links = [];
+      cell.getRuns().forEach(run => {
+        const url = run.getLinkUrl();
+        if (url) links.push(url);
+      });
+      const plan = Logic.planGithubIssueCell(cell.getText(), links);
+      if (!plan.rewrite) continue;
+      writeGithubIssueCell_(sh.getRange(rowNumber, col), plan);
+    } catch (e) {
+      console.error(sh.getName() + ' row ' + rowNumber + ' GitHub issues skipped: ' + errorMessage_(e));
+    }
+  }
+}
+
+function formatGithubIssuesForYmds_(ymds) {
+  const ss = SpreadsheetApp.getActive();
+  const team = ss.getSheetByName(SHEETS.TEAM);
+  if (!team) return { members: 0, missingTeam: true };
+  const ymdSet = {};
+  (ymds || []).forEach(ymd => { if (ymd) ymdSet[ymd] = true; });
+  const members = readTeamRows_(team);
+  members.forEach(member => {
+    try {
+      formatGithubIssuesOnSheet_(ss.getSheetByName(sanitizeSheetName_(member.name)), ymdSet);
+    } catch (e) {
+      console.error('GitHub issues skipped ' + member.name + ': ' + errorMessage_(e));
+    }
+  });
+  return { members: members.length, missingTeam: false };
+}
+
+function formatGithubIssuesForToday_() {
+  return formatGithubIssuesForYmds_([Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd')]);
+}
+
+function formatTodaysGithubIssues() {
+  const result = formatGithubIssuesForToday_();
+  const ui = SpreadsheetApp.getUi();
+  if (result.missingTeam) {
+    ui.alert('Team sheet is missing.');
+    return;
+  }
+  ui.alert('Formatted today\'s GitHub issue cells on ' + result.members + ' member sheet(s).');
+}
+
+function formatGithubIssues_trigger() {
+  formatGithubIssuesForToday_();
+}
+
+function readMemberIssuePlans_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const rows = sheet.getLastRow() - 1;
+  const col = MEMBER_HEADERS.indexOf('GitHub Issues') + 1;
+  try {
+    return sheet.getRange(2, col, rows, 1).getRichTextValues().map(row => {
+      const cell = row[0];
+      const links = [];
+      cell.getRuns().forEach(run => {
+        const url = run.getLinkUrl();
+        if (url) links.push(url);
+      });
+      return Logic.planGithubIssueCell(cell.getText(), links);
+    });
+  } catch (e) {
+    console.error(sheet.getName() + ' GitHub issue read skipped: ' + errorMessage_(e));
+    return [];
+  }
 }
 
 const ROSTER = [
@@ -501,7 +638,10 @@ function scheduleAllows_(jobName) {
 function installSchedulesFromSheet_() {
   const ss = SpreadsheetApp.getActive();
   ensureSchedulesSheet_();
-  const handlers = Object.values(SCHEDULE_HANDLERS).concat(['postTodaysSummary_trigger']);
+  const handlers = Object.values(SCHEDULE_HANDLERS).concat([
+    'postTodaysSummary_trigger',
+    'formatGithubIssues_trigger'
+  ]);
   ScriptApp.getProjectTriggers().forEach(trigger => {
     if (handlers.indexOf(trigger.getHandlerFunction()) >= 0) ScriptApp.deleteTrigger(trigger);
   });
@@ -526,6 +666,7 @@ function installSchedulesFromSheet_() {
     }
     ScriptApp.newTrigger(handler).timeBased().atHour(check.hour).nearMinute(check.minute).everyDays(1).create();
   });
+  ScriptApp.newTrigger('formatGithubIssues_trigger').timeBased().everyHours(1).create();
 }
 
 function installOperationalTriggers_() {
@@ -541,6 +682,7 @@ function applySchedulesFromMenu() {
     return row.job + ': ' + row.days + ' at ' +
       Logic.formatClockTime(row.hour, row.minute) + ' IST';
   });
+  lines.push('GitHub issues: every hour, today\'s rows only');
   SpreadsheetApp.getUi().alert(
     'Triggers reinstalled from the Schedules sheet.\n' +
     'Edit that sheet (days / hour / minute / Enabled), then run this again.\n\n' +
@@ -713,49 +855,55 @@ function postDailyUpdatesToChat_(opts) {
     return;
   }
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  try {
+    formatGithubIssuesForYmds_([today]);
+  } catch (e) {
+    console.error('GitHub issue format before daily post failed: ' + errorMessage_(e));
+  }
   const members = readTeamRows_(team);
   const configured = readConfiguredSpaces_(ss);
   if (!configured.length) {
     if (!silent) SpreadsheetApp.getUi().alert('No Chat space has both Configured checked and a webhook property set.');
     return;
   }
-  const spaceCol = MEMBER_HEADERS.indexOf('Space');
   const blocksBySpace = {};
   // One read per member. Reading the sheet again for every space makes
   // SpreadsheetApp fail with "a server error occurred" and posts nothing.
   members.forEach(m => {
-    const sh = ss.getSheetByName(sanitizeSheetName_(m.name));
-    if (!sh || sh.getLastRow() < 2) return;
-    const n = sh.getLastRow() - 1;
-    let rows;
     try {
-      rows = sh.getRange(2, 1, n, MEMBER_HEADERS.length).getValues();
+      const sh = ss.getSheetByName(sanitizeSheetName_(m.name));
+      const rows = readMemberBody_(sh);
+      const issuePlans = readMemberIssuePlans_(sh);
+      if (!rows.length) return;
+      const linesBySpace = {};
+      const parsed = Logic.collectSafe(rows, (row, index) => {
+        const item = parsedMemberRow_(row);
+        if (!item) return null;
+        const plan = issuePlans[index];
+        item.issueUrls = plan && plan.issues ? plan.issues.map(issue => issue.url) : [];
+        return item;
+      });
+      if (parsed.skipped) console.error('Daily post skipped ' + parsed.skipped + ' row(s) for ' + m.name);
+      parsed.values.forEach(item => {
+        if (item.date !== today || !item.summary || !item.space) return;
+        const summary = Logic.truncateText(item.summary, 800);
+        const blockers = Logic.truncateText(item.blockers, 400);
+        const plan = Logic.truncateText(item.plan, 400);
+        if (!linesBySpace[item.space]) linesBySpace[item.space] = [];
+        const hoursText = item.hours ? String(round1_(item.hours)) : '';
+        const line = Logic.formatDailyUpdateLine(summary, hoursText, blockers, item.issueUrls);
+        linesBySpace[item.space].push(line);
+        if (plan) linesBySpace[item.space].push('   → Tomorrow: ' + plan);
+      });
+      Object.keys(linesBySpace).forEach(spaceName => {
+        if (!blocksBySpace[spaceName]) blocksBySpace[spaceName] = [];
+        blocksBySpace[spaceName].push('• ' + chatLabel_(m));
+        linesBySpace[spaceName].forEach(line => blocksBySpace[spaceName].push('   ' + line));
+        blocksBySpace[spaceName].push('');
+      });
     } catch (e) {
-      console.error('Daily post could not read ' + m.name + ': ' + ((e && e.message) ? e.message : e));
-      return;
+      console.error('Daily post skipped ' + m.name + ': ' + errorMessage_(e));
     }
-    const linesBySpace = {};
-    rows.forEach(row => {
-      const rowDate = normalizeDateOnly_(row[0]);
-      const summary = Logic.truncateText((row[1] || '').toString().trim(), 800);
-      const spaceName = (row[spaceCol] || '').toString().trim();
-      if (rowDate !== today || !summary || !spaceName) return;
-      const hoursNum = parseHoursToNumber_(row[2]);
-      const blockers = Logic.truncateText((row[3] || '').toString().trim(), 400);
-      const plan = Logic.truncateText((row[4] || '').toString().trim(), 400);
-      if (!linesBySpace[spaceName]) linesBySpace[spaceName] = [];
-      let line = '– ' + summary;
-      if (hoursNum) line += ` (${round1_(hoursNum)}h)`;
-      if (blockers) line += ` • Blockers: ${blockers}`;
-      linesBySpace[spaceName].push(line);
-      if (plan) linesBySpace[spaceName].push('   → Tomorrow: ' + plan);
-    });
-    Object.keys(linesBySpace).forEach(spaceName => {
-      if (!blocksBySpace[spaceName]) blocksBySpace[spaceName] = [];
-      blocksBySpace[spaceName].push('• ' + chatLabel_(m));
-      linesBySpace[spaceName].forEach(line => blocksBySpace[spaceName].push('   ' + line));
-      blocksBySpace[spaceName].push('');
-    });
   });
 
   let posted = 0;
@@ -1114,13 +1262,61 @@ function sendReminder_trigger() {
   return sendReminder_({ silent: true });
 }
 
-function memberUpdateRows_(sh) {
-  if (!sh || sh.getLastRow() < 2) return [];
+function errorMessage_(e) {
+  return (e && e.message) ? e.message : String(e);
+}
+
+function readGrid_(sheet, numCols, label) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const numRows = sheet.getLastRow() - 1;
+  const width = Math.max(1, numCols);
+  const name = label || sheet.getName();
+  const readRow = (rowNumber) => {
+    try {
+      return sheet.getRange(rowNumber, 1, 1, width).getValues()[0];
+    } catch (valuesErr) {
+      try {
+        return sheet.getRange(rowNumber, 1, 1, width).getDisplayValues()[0];
+      } catch (displayErr) {
+        console.error(name + ' row ' + rowNumber + ' skipped: ' + errorMessage_(displayErr));
+        return null;
+      }
+    }
+  };
+  try {
+    return sheet.getRange(2, 1, numRows, width).getValues();
+  } catch (rangeErr) {
+    console.error(name + ' range read failed: ' + errorMessage_(rangeErr));
+    const rows = [];
+    for (let i = 0; i < numRows; i++) rows.push(readRow(i + 2));
+    return rows;
+  }
+}
+
+function readMemberBody_(sheet) {
+  return readGrid_(sheet, MEMBER_HEADERS.length, sheet ? sheet.getName() : 'member');
+}
+
+function parsedMemberRow_(row) {
+  if (!row) return null;
   const spaceCol = MEMBER_HEADERS.indexOf('Space');
-  return sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), MEMBER_HEADERS.length)).getValues().map(row => ({
-    date: normalizeDateOnly_(row[0]),
-    summary: String(row[1] || '').trim(),
-    space: String(row[spaceCol] || '').trim()
+  return {
+    date: normalizeDateOnly_(Logic.cellText(row[0])),
+    summary: Logic.cellText(row[1]),
+    hours: parseHoursToNumber_(Logic.cellText(row[2])),
+    blockers: Logic.cellText(row[3]),
+    plan: Logic.cellText(row[4]),
+    space: Logic.cellText(row[spaceCol])
+  };
+}
+
+function memberUpdateRows_(sh, memberName) {
+  const parsed = Logic.collectSafe(readMemberBody_(sh), row => parsedMemberRow_(row));
+  if (parsed.skipped) console.error('Reminder skipped ' + parsed.skipped + ' row(s) for ' + (memberName || 'a member'));
+  return parsed.values.map(item => ({
+    date: item.date,
+    summary: item.summary,
+    space: item.space
   }));
 }
 
@@ -1146,7 +1342,12 @@ function sendReminder_(opts) {
 
   members.forEach(member => {
     const checks = matrix[member.name] || {};
-    const rows = memberUpdateRows_(ss.getSheetByName(sanitizeSheetName_(member.name)));
+    let rows = [];
+    try {
+      rows = memberUpdateRows_(ss.getSheetByName(sanitizeSheetName_(member.name)), member.name);
+    } catch (e) {
+      console.error('Reminder skipped ' + member.name + ': ' + errorMessage_(e));
+    }
     spaces.forEach(space => {
       if (checks[space.name] !== true) return;
       if (Logic.hasUpdateForSpace(rows, todayStr, space.name)) return;
@@ -1216,29 +1417,39 @@ function weeklyCollatePreviousWeek_(opts) {
   if (!team) { if (!silent) SpreadsheetApp.getUi().alert('Team sheet not found.'); return; }
 
   const { weekStartYMD, weekEndYMD } = getPreviousWeekRangeIST_();
+  try {
+    formatGithubIssuesForYmds_(Logic.datesInRange(weekStartYMD, weekEndYMD));
+  } catch (e) {
+    console.error('GitHub issue format before weekly roll-up failed: ' + errorMessage_(e));
+  }
   const members = readTeamRows_(team);
-  const spaceCol = MEMBER_HEADERS.indexOf('Space');
   const bySpace = {};
 
   members.forEach(member => {
-    const sh = ss.getSheetByName(sanitizeSheetName_(member.name));
-    if (!sh || sh.getLastRow() < 2) return;
-    const data = sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(sh.getLastColumn(), MEMBER_HEADERS.length)).getValues();
+    let data = [];
+    try {
+      data = readMemberBody_(ss.getSheetByName(sanitizeSheetName_(member.name)));
+    } catch (e) {
+      console.error('Weekly roll-up skipped ' + member.name + ': ' + errorMessage_(e));
+      return;
+    }
     const buckets = {};
-    data.forEach(row => {
-      const rowYMD = normalizeDateOnly_(row[0]);
+    const parsed = Logic.collectSafe(data, row => parsedMemberRow_(row));
+    if (parsed.skipped) console.error('Weekly roll-up skipped ' + parsed.skipped + ' row(s) for ' + member.name);
+    parsed.values.forEach(item => {
+      const rowYMD = item.date;
       if (!rowYMD || rowYMD < weekStartYMD || rowYMD > weekEndYMD) return;
-      const summary = (row[1] || '').toString().trim();
-      const spaceName = (row[spaceCol] || '').toString().trim();
-      if (!summary || !spaceName) return;
-      const hoursNum = parseHoursToNumber_(row[2]);
-      const blockers = (row[3] || '').toString().trim();
-      const prettyDate = Utilities.formatDate(ymdToDate_(rowYMD), TZ, 'EEE, MMM d');
-      const parts = [`• ${prettyDate}: ${summary}`];
-      if (hoursNum) parts.push(`(${round1_(hoursNum)}h)`);
-      if (blockers) parts.push(`— Blockers: ${blockers}`);
-      if (!buckets[spaceName]) buckets[spaceName] = [];
-      buckets[spaceName].push({ ymd: rowYMD, line: parts.join(' ') });
+      if (!item.summary || !item.space) return;
+      let prettyDate = rowYMD;
+      try {
+        prettyDate = Utilities.formatDate(ymdToDate_(rowYMD), TZ, 'EEE, MMM d');
+      } catch (e) {
+        prettyDate = rowYMD;
+      }
+      const hoursText = item.hours ? String(round1_(item.hours)) : '';
+      const line = Logic.formatWeeklyEntryLine(prettyDate, item.summary, hoursText, item.blockers);
+      if (!buckets[item.space]) buckets[item.space] = [];
+      buckets[item.space].push({ ymd: rowYMD, line: line });
     });
     Object.keys(buckets).forEach(spaceName => {
       const entries = buckets[spaceName].slice().sort((a, b) =>
@@ -1264,27 +1475,40 @@ function weeklyCollatePreviousWeek_(opts) {
   const wk = ensureWeeklySheet_(ss);
   const existingMap = {};
   if (wk.getLastRow() > 1) {
-    wk.getRange(2, 1, wk.getLastRow() - 1, 4).getValues().forEach((r, i) => {
-      const startKey = normalizeDateOnly_(r[0]) || (r[0] || '').toString().trim();
-      const key = `${startKey}|${(r[2] || '').toString().trim()}|${(r[3] || '').toString().trim()}`;
-      if (startKey) existingMap[key] = i + 2;
+    readGrid_(wk, 4, 'Weekly Rollup').forEach((r, i) => {
+      if (!r) return;
+      try {
+        const startKey = normalizeDateOnly_(r[0]) || Logic.cellText(r[0]);
+        const key = `${startKey}|${Logic.cellText(r[2])}|${Logic.cellText(r[3])}`;
+        if (startKey) existingMap[key] = i + 2;
+      } catch (e) {
+        console.error('Weekly roll-up index row ' + (i + 2) + ' skipped: ' + errorMessage_(e));
+      }
     });
   }
 
   spaceNames.forEach(spaceName => {
     bySpace[spaceName].forEach(col => {
-      const key = `${weekStartYMD}|${spaceName}|${col.member}`;
-      const rowNum = existingMap[key];
-      if (rowNum) {
-        wk.getRange(rowNum, 2).setValue(weekEndYMD);
-        wk.getRange(rowNum, 5).setValue(col.text).setWrap(true);
-      } else {
-        wk.appendRow([weekStartYMD, weekEndYMD, spaceName, col.member, col.text]);
-        wk.getRange(wk.getLastRow(), 5).setWrap(true);
+      try {
+        const key = `${weekStartYMD}|${spaceName}|${col.member}`;
+        const rowNum = existingMap[key];
+        if (rowNum) {
+          wk.getRange(rowNum, 2).setValue(weekEndYMD);
+          wk.getRange(rowNum, 5).setValue(col.text).setWrap(true);
+        } else {
+          wk.appendRow([weekStartYMD, weekEndYMD, spaceName, col.member, col.text]);
+          wk.getRange(wk.getLastRow(), 5).setWrap(true);
+        }
+      } catch (e) {
+        console.error('Weekly roll-up could not save ' + col.member + ' for ' + spaceName + ': ' + errorMessage_(e));
       }
     });
   });
-  autoResize_(wk);
+  try {
+    autoResize_(wk);
+  } catch (e) {
+    console.error('Weekly roll-up resize skipped: ' + errorMessage_(e));
+  }
 
   const summariesSheet = ensureWeeklySpaceSummariesSheet_(ss);
   const summaryMap = readWeeklySpaceSummaries_(summariesSheet);
@@ -1298,6 +1522,7 @@ function weeklyCollatePreviousWeek_(opts) {
   const skipped = [];
   const failures = [];
   spaceNames.forEach((spaceName, spaceIndex) => {
+    try {
     const webhook = configured[spaceName];
     if (!webhook) { skipped.push(spaceName); return; }
     const blocks = bySpace[spaceName];
@@ -1309,9 +1534,13 @@ function weeklyCollatePreviousWeek_(opts) {
       if (spaceIndex > 0) Utilities.sleep(1500);
       aiSummary = summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD, blocks);
       if (aiSummary) {
-        writeWeeklySpaceSummary_(summariesSheet, weekStartYMD, weekEndYMD, spaceName, aiSummary);
-        summaryMap[summaryKey] = aiSummary;
-        summarized++;
+        try {
+          writeWeeklySpaceSummary_(summariesSheet, weekStartYMD, weekEndYMD, spaceName, aiSummary);
+          summaryMap[summaryKey] = aiSummary;
+          summarized++;
+        } catch (e) {
+          console.error('Weekly summary was not stored for ' + spaceName + ': ' + errorMessage_(e));
+        }
       }
     }
     if (dryRun) {
@@ -1328,6 +1557,12 @@ function weeklyCollatePreviousWeek_(opts) {
       skipped.push(spaceName);
       failures.push({ name: spaceName, error: errMsg });
       console.error('Weekly post failed for ' + spaceName + ': ' + errMsg);
+    }
+    } catch (e) {
+      const errMsg = errorMessage_(e);
+      skipped.push(spaceName);
+      failures.push({ name: spaceName, error: errMsg });
+      console.error('Weekly roll-up skipped ' + spaceName + ': ' + errMsg);
     }
   });
   noteWebhookFailures_('Weekly roll-up', failures);
@@ -1376,12 +1611,12 @@ function ensureWeeklySpaceSummariesSheet_(ss) {
 
 function readWeeklySpaceSummaries_(sheet) {
   const map = {};
-  if (!sheet || sheet.getLastRow() < 2) return map;
-  sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues().forEach(row => {
-    const start = normalizeDateOnly_(row[0]) || String(row[0] || '').trim();
-    const space = String(row[2] || '').trim();
-    const summary = String(row[3] || '').trim();
+  Logic.collectSafe(readGrid_(sheet, 4, 'Weekly Space Summaries'), row => {
+    const start = normalizeDateOnly_(row[0]) || Logic.cellText(row[0]);
+    const space = Logic.cellText(row[2]);
+    const summary = Logic.cellText(row[3]);
     if (start && space && summary) map[`${start}|${space}`] = summary;
+    return true;
   });
   return map;
 }
@@ -1391,8 +1626,9 @@ function writeWeeklySpaceSummary_(sheet, weekStartYMD, weekEndYMD, spaceName, su
   if (!sheet || !text) return;
   const key = `${weekStartYMD}|${spaceName}`;
   if (sheet.getLastRow() >= 2) {
-    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+    const values = readGrid_(sheet, 4, 'Weekly Space Summaries');
     for (let i = 0; i < values.length; i++) {
+      if (!values[i]) continue;
       const start = normalizeDateOnly_(values[i][0]) || String(values[i][0] || '').trim();
       const space = String(values[i][2] || '').trim();
       if (`${start}|${space}` === key) {
@@ -1627,14 +1863,25 @@ function sanitizeSheetName_(name) {
 }
 
 function normalizeDateOnly_(val) {
-  if (Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val)) {
-    return Utilities.formatDate(val, TZ, 'yyyy-MM-dd');
+  try {
+    if (Object.prototype.toString.call(val) === '[object Date]' && !isNaN(val.getTime())) {
+      return Utilities.formatDate(val, TZ, 'yyyy-MM-dd');
+    }
+    const s = Logic.cellText(val);
+    if (!s) return '';
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      const ymd = s.slice(0, 10);
+      const parts = ymd.split('-').map(Number);
+      const check = new Date(parts[0], parts[1] - 1, parts[2]);
+      if (check.getFullYear() !== parts[0] || check.getMonth() !== parts[1] - 1 || check.getDate() !== parts[2]) return '';
+      return ymd;
+    }
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
+  } catch (e) {
+    return '';
   }
-  const s = (val || '').toString().trim();
-  if (!s) return '';
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const d = new Date(s);
-  return isNaN(d) ? '' : Utilities.formatDate(d, TZ, 'yyyy-MM-dd');
 }
 
 // Robust, case-insensitive duration parser

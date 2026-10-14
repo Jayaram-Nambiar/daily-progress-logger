@@ -98,7 +98,7 @@ The Apps Script project and the spreadsheet already exist. This checkout does no
 2. Run `npx clasp login` and sign in as `dr.jayaram@arcaai.com`.
 3. Confirm `.clasp.json` contains only `scriptId` and `rootDir`. Do not add `projectId`.
 4. Run `npm run pull` to refresh `src/`, or `npm test` then `npm run push` after editing `src/`.
-5. In the spreadsheet, reload so the **Daily Progress** menu appears. Use **Apply schedules from sheet** if the trigger list is empty. Defaults: weekday 6:00 PM reminder, weekday 7:00 PM daily post, Monday 9:00 AM weekly roll-up. Do not enable the Space access row until Team column E is filled and you want the 8:00 AM reapply job.
+5. In the spreadsheet, reload so the **Daily Progress** menu appears. Use **Apply schedules from sheet** if the trigger list is empty. Defaults: weekday 6:00 PM reminder, weekday 7:00 PM daily post, Monday 9:00 AM weekly roll-up. **Apply schedules from sheet** also installs an hourly GitHub issue formatter. It rewrites today’s GitHub Issues cells and does not post to Chat. Do not enable the Space access row until Team column E is filled and you want the 8:00 AM reapply job.
 6. Optionally configure OpenRouter (**Set OpenRouter API key**) as above.
 
 For empty-sheet bootstrap, webhooks, membership, and failure modes, follow the [runbook](docs/runbooks/spaces-roster-and-daily-posts.md) from §4 onward.
