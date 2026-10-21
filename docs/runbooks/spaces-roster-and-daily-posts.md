@@ -48,9 +48,9 @@ On a schedule (Asia/Kolkata):
 | When (default) | What happens |
 |---|---|
 | Weekdays ~18:00 | Reminder in each Chat space for people who are checked on the Reminder Matrix and have not logged today for that space. Also one email per person listing spaces they still owe. |
-| Weekdays ~19:00 | Today’s rows are posted to Google Chat, split by the Space column (only spaces with a webhook). Recognized GitHub issue URLs are included on the summary line. |
+| Every day ~19:00 | Today’s rows are posted to Google Chat, split by the Space column (only spaces with a webhook). Saturday, Sunday, and a holiday are included when that date is today. Recognized GitHub issue URLs are included on the summary line. |
 | Every hour | Today’s **GitHub Issues** cells are rewritten to linked issue numbers. This does not post to Chat. The 19:00 post and the Monday roll-up format again before they read the sheet. |
-| Monday ~09:00 | The script writes the previous Monday–Sunday week to **Weekly Rollup**. Each space with a webhook gets one summary. The script appends any member the model omits. If every model fails, that space gets the member week text. Last week’s GitHub issue cells are formatted first. Those URLs are not part of the Monday message. |
+| Monday ~09:00 | The script writes the previous Monday–Sunday week to **Weekly Rollup**. Each space with a webhook gets one summary of short bullets. A long week is split so the reply is not cut off. A stored summary that was cut off is generated again. A member still missing is appended. If every model fails, that space gets the member week text. Last week’s GitHub issue cells are formatted first. Those URLs are not part of the Monday message. |
 
 The script never calls the Google Chat API. It posts only through **incoming webhooks** stored as Script Properties. Slack code exists but does not send (`SLACK_ENABLED = false`).
 
@@ -75,7 +75,7 @@ The script never calls the Google Chat API. It posts only through **incoming web
 |---|---|
 | Node.js | LTS is fine. Used for `npm install`, `npm test`, and clasp. |
 | This repo | Local clone of Daily Progress Logger. |
-| clasp login | `npx clasp login` as `dr.jayaram@arcaai.com`. Credentials land in `%USERPROFILE%\.clasprc.json`. |
+| clasp login | `npx clasp --auth .clasprc.json --user arca login` as `dr.jayaram@arcaai.com`. Credentials land in `.clasprc.json` in this folder (gitignored). `npm run pull` and `npm run push` use that same file. |
 | Spreadsheet access | Edit rights on DailyProgressTracker. |
 | Google Chat | Membership in the project spaces you will configure. |
 | OpenRouter (optional) | Free-tier account + API key if you want LLM weekly summaries. |
@@ -93,7 +93,7 @@ In PowerShell, from the repo root:
 ```powershell
 cd "C:\Users\jayar\Documents\Daily Progress Logger"
 npm install
-npx clasp login
+npx clasp --auth .clasprc.json --user arca login
 ```
 
 Sign in as `dr.jayaram@arcaai.com`. Then:
@@ -130,10 +130,10 @@ npm run push
 If clasp prints `Skipping push` after an `oauthScopes` change in a non-TTY session:
 
 ```powershell
-npx clasp push --force
+npx clasp --auth .clasprc.json --user arca push --force
 ```
 
-That is clasp force, not git force. Push/pull do **not** change Script Properties, triggers, or sheet cells.
+That is clasp force, not git force. Push/pull do **not** change Script Properties, triggers, or sheet cells. After a push, reload the spreadsheet and run **Format today’s GitHub issues** once, or **Apply schedules from sheet**. Either installs `formatGithubIssues_trigger` every hour. The push itself does not create it. The daily post and the Monday roll-up install that hourly trigger when it is missing.
 
 ### 4.4 Reload the spreadsheet menu
 
@@ -237,7 +237,7 @@ Apps Script cannot turn on “Allow multiple selections”. That flag was set in
 | Job | Default Days | Hour | Minute | Handler |
 |---|---|---|---|---|
 | Reminder | Mon–Fri | 18 | 0 | `sendReminder_trigger` |
-| Daily post | Mon–Fri | 19 | 0 | `postDailyUpdatesToChat_trigger` |
+| Daily post | Every day | 19 | 0 | `postDailyUpdatesToChat_trigger` |
 | Weekly roll-up | Mon | 9 | 0 | `weeklyRollup_trigger` |
 | Space access | Mon–Fri | 8 | 0 | `refreshSpaceAccess_trigger` |
 
@@ -254,7 +254,7 @@ Apps Script only accepts minutes **0, 15, 30, 45**, and may start up to ~15 minu
 | Disable one job | Uncheck Enabled on that row → **Apply schedules from sheet** |
 | Remove old Slack 20:30 trigger | Slack-only cleanup (Apply schedules from sheet also deletes the old Slack trigger) |
 
-**Apply schedules from sheet** also installs `formatGithubIssues_trigger` to run every hour. That job is not a row on the Schedules sheet. Apply deletes the previous copy of that same trigger before it creates a new one.
+**Apply schedules from sheet** installs `formatGithubIssues_trigger` to run every hour. That job is not a row on the Schedules sheet. Apply deletes the previous copy of that same trigger before it creates a new one. **Format today’s GitHub issues**, the daily post, and the Monday roll-up install the same hourly trigger when it is missing, and they leave the other clock triggers alone.
 
 Check: **Extensions → Apps Script → Triggers** (clock icon) lists the expected handlers in Asia/Kolkata. The hourly GitHub issue trigger is in that list after you apply schedules.
 
@@ -279,11 +279,11 @@ When configured and enabled:
 1. For each Chat space that has a webhook **and** at least one previous-week member update tagged to that space…
 2. The script calls OpenRouter (`UrlFetchApp` only — stays on default GCP).
 3. Primary free model, then fallback free model.
-4. Chat receives one summary. The script appends any member the model omits.
-5. Summaries are stored on sheet **Weekly Space Summaries** and reused on re-runs.
+4. Chat receives one summary of short bullets. A cut-off reply is summarized again in smaller groups. The script appends a member only when that name is still missing.
+5. Summaries are stored on sheet **Weekly Space Summaries**. A complete summary is reused on re-runs. A cell that contains `…[truncated]` or misses a member is generated again.
 6. If every free model fails (or returns empty), Chat gets that space’s member week text **unchanged**.
 
-Spaces with **no** previous-week member content for that space are skipped entirely: no LLM call (saves free-tier tokens), no Chat post, no Weekly Space Summaries row. The LLM input uses the member’s name and tags each post with `[YYYY-MM-DD]` (sorted ascending). It asks for a short synthesis, not a copy of every line.
+Spaces with **no** previous-week member content for that space are skipped entirely: no LLM call (saves free-tier tokens), no Chat post, no Weekly Space Summaries row. The LLM input uses the member’s name and tags each post with `[YYYY-MM-DD]` (sorted ascending). It keeps one member in one model call. Outcomes stay in date order. Saturday, Sunday, and holidays in the source are included.
 
 ### 8.2 Get a free-tier API key
 
@@ -331,10 +331,10 @@ Weekly posts continue with member-text fallback only.
 1. Confirm `OPENROUTER_API_KEY` is set (**Set OpenRouter API key**).
 2. Prefer waiting for Monday ~09:00, **or** run **Run weekly roll-up now** once when you intentionally want live posts.
 3. Check **Weekly Space Summaries** for new LLM Summary rows.
-4. Read one Chat space that had previous-week content. Expect one bullet per member when the model succeeded. Expect that member's week text when the model omitted the name.
+4. Read one Chat space that had previous-week content. Expect one member section, with outcomes in date order, when the model succeeded. Saturday and Sunday stay with that member. A member is not split across two Chat messages. Expect that member's week text only when the name is still missing after the summary calls. Do not expect `…[truncated]` followed by raw notes.
 5. Apps Script → **Executions**: look for OpenRouter HTTP errors if a space fell back to member text.
 
-Re-running weekly roll-up **reuses** stored summaries unless code is changed to force regeneration. Clearing the matching **Weekly Space Summaries** row forces a fresh LLM call on the next run (when enabled).
+Re-running weekly roll-up reuses a stored summary that names every member and does not contain `…[truncated]`. A cut-off or incomplete cell is generated again. Clearing the matching **Weekly Space Summaries** row also forces a fresh LLM call on the next run (when enabled). A re-run posts again to every space that had rows that week.
 
 ### 8.7 Free-tier model policy
 
@@ -345,7 +345,7 @@ Re-running weekly roll-up **reuses** stored summaries unless code is changed to 
 | 3 | `openrouter/free` | Router over whatever OpenRouter currently offers for free |
 | 4 | _(none)_ | Post that space’s collated member updates as-is |
 
-Requests send `reasoning.effort: none`. A stored `OPENROUTER_MODEL` that still names the retired Llama 3.3, DeepSeek V4 Flash, or `qwen/qwen3.8-27b:free` ids does not call those ids. **Set OpenRouter API key** rewrites the property to the current defaults. The weekday **Daily post** reads each member sheet once, then posts. It does not call OpenRouter.
+Requests send `reasoning.effort: none`. A stored `OPENROUTER_MODEL` that still names the retired Llama 3.3, DeepSeek V4 Flash, or `qwen/qwen3.8-27b:free` ids does not call those ids. **Set OpenRouter API key** rewrites the property to the current defaults. The **Daily post** reads each member sheet once, then posts. It does not call OpenRouter. It runs on Saturday, Sunday, and a holiday when that date is today.
 
 If you change `OPENROUTER_MODEL`, keep only `:free` ids. After changing models by hand, you can re-run **Set OpenRouter API key** (paste the same key) to reset the list to code defaults.
 
@@ -355,7 +355,7 @@ If you change `OPENROUTER_MODEL`, keep only `:free` ids. After changing models b
 
 ### For each member
 
-Log the row before 19:00 Asia/Kolkata on a weekday.
+Log the row before 19:00 Asia/Kolkata on that calendar day. Saturday, Sunday, and a holiday count.
 
 1. Open your personal tab.
 2. The tab name must match your name on Team.
@@ -380,7 +380,7 @@ It keeps a row only when all three are true.
 A blank **GitHub Issues** cell still posts. When the cell has recognized issue URLs, the daily Chat line adds `Issues:` and those full URLs after blockers. The Monday roll-up formats last week’s issue cells and does not put those URLs in the Monday Chat message.
 
 A blank Space posts to no space.
-A row saved after 19:00 waits for the next weekday.
+A row saved after 19:00 waits for the next scheduled Daily post day. The default is the next calendar day, including Saturday and Sunday.
 A past date is not in that 19:00 post.
 Monday 09:00 reads the previous Monday through Sunday.
 A row added after that Monday job is not in that week post.
@@ -398,6 +398,7 @@ That row does not clear a reminder.
 | Someone joined a Chat space | Update Team column E. Then run **Apply Team spaces to reminder matrix**. |
 | New project space | Add a Chat Spaces row. Create the webhook. Save it with **Set Chat webhook…**. Fill Team column E. Run **Sync reminder matrix**. |
 | Change a clock time | Edit the Schedules sheet. Then run **Apply schedules from sheet**. |
+| Code was pushed | Reload the sheet. Run **Apply schedules from sheet** so the hourly GitHub issue trigger exists. A clasp push does not install triggers. |
 | Disable LLM summaries | Set `OPENROUTER_ENABLED` to `0`. Or clear the key with **Set OpenRouter API key**. |
 | A space got no post | Check Configured, the webhook property, the Space cell, and Executions. |
 
@@ -526,11 +527,20 @@ Use this item after you edit Team by hand.
 The script reads each name on Team.
 It creates a missing personal tab.
 It writes a header cell only when that cell is wrong.
+It writes **GitHub Issues** in column G, with the header note and wrap, when that header is missing.
 It does not delete tabs.
 It does not clear body rows.
 It sets the date format on column A.
 It sets the Space dropdown on column F.
 **Add or update member** already syncs that one tab.
+
+Use this item to add the GitHub Issues column on every existing member tab after a code push:
+
+1. Reload the spreadsheet as `dr.jayaram@arcaai.com`.
+2. Click **Sync member sheets**.
+3. Read the alert. It counts member sheets and says no data was cleared.
+4. Open a member tab. Column G is **GitHub Issues**. Hover that header for the paste instructions.
+5. Run **Apply schedules from sheet** once so the hourly formatter exists.
 
 ### 11.3 Bootstrap roster, spaces and sheets
 
@@ -646,7 +656,7 @@ It does not post to Chat.
 Recognized cells show the issue numbers, separated by commas, and each number is a link.
 A blank cell stays blank.
 Text that is not a GitHub issue URL stays as typed.
-The same rewrite runs every hour, again at the start of **Post today’s updates now**, and for the previous Monday–Sunday week at the start of **Run weekly roll-up now**.
+The same rewrite runs every hour, again at the start of **Post today’s updates now**, and for the previous Monday–Sunday week at the start of **Run weekly roll-up now**. Those three runs install the hourly trigger when it is missing. Column G is plain text so `9, 10` stays two links. Sheets would otherwise store that text as 10 September and drop both links.
 
 An issue page looks like `https://github.com/ArcaAI/project-hope/issues/8`.
 A project-board link also counts when its query contains `issue=ArcaAI|project-hope|8` or the `%7C` encoding of those pipes.
@@ -698,8 +708,9 @@ The date must fall inside that week.
 The script does not read rows that were absent at run time.
 A later edit of an old week is not in Chat until you run this item again.
 
-When OpenRouter returns text, Chat gets that summary.
-The script appends each member whose name is missing from the summary.
+When OpenRouter returns text, Chat gets that summary of short bullets.
+A cut-off reply is summarized again in smaller groups.
+The script appends a member only when that full name is still missing.
 When every model fails, Chat gets the member text for that space.
 A space with no week rows gets no Chat post.
 
@@ -761,14 +772,17 @@ Default rows:
 | Job | Days | Time | Handler |
 |---|---|---|---|
 | Reminder | Weekdays | 18:00 | `sendReminder_trigger` |
-| Daily post | Weekdays | 19:00 | `postDailyUpdatesToChat_trigger` |
+| Daily post | Every day | 19:00 | `postDailyUpdatesToChat_trigger` |
 | Weekly roll-up | Monday | 09:00 | `weeklyRollup_trigger` |
 | Space access | Weekdays | 08:00 | `refreshSpaceAccess_trigger` |
 
 Leave Space access disabled until you want the 08:00 reapply.
 That job only reapplies column E.
 It cannot refresh Chat membership.
-Apps Script may start a job up to about 15 minutes after the set minute.
+The same click installs `formatGithubIssues_trigger` every hour.
+The alert ends with `GitHub issues: every hour, today's rows only`.
+That hourly job is not a row on the Schedules sheet.
+Apps Script may start a clock job up to about 15 minutes after the set minute.
 
 ### 11.12 Set OpenRouter API key
 
@@ -875,8 +889,9 @@ Those URLs are not added to the weekly Chat message or the OpenRouter prompt.
 The script uses the same Summary and Space rules as the daily post.
 The date must fall in that week.
 The script writes **Weekly Rollup**.
-When the model returns text, Chat gets that summary.
-The script appends each member whose name is missing from the summary.
+When the model returns text, Chat gets that summary of short bullets.
+A cut-off reply is summarized again in smaller groups.
+The script appends a member only when that full name is still missing.
 When every model fails, Chat gets the member text for that space.
 A space with no webhook is not posted.
 The sheet rows for that space are still saved.
@@ -888,9 +903,9 @@ The sheet rows for that space are still saved.
 1. Format last week’s **GitHub Issues** cells, then collate the previous week per member per space. Member text uses a readable date and does not include issue URLs. The model input uses an ISO date and also does not include issue URLs.
 2. Upsert **Weekly Rollup** (`weekStart|space|member`).
 3. For each space with a webhook:
-   - If OpenRouter enabled and no stored summary → call free models in order with dated prompt.
+   - If OpenRouter is enabled and the stored summary is missing, cut off, or missing a member → call free models in order with the dated prompt. At most 6 members per call. A longer source is split between members. One member stays in one call. If that reply stops early, those members are summarized again in smaller groups.
    - Write success to **Weekly Space Summaries**.
-   - Build the Chat message from the summary, then append any omitted member. If the summary is empty, use the member text.
+   - Build the Chat message from the summary, then append any member whose full name is still absent. If the summary is empty, use the member text.
    - `sendToChat_` via that space’s webhook.
 
 Prompt rules in `src/logic.js`:
@@ -899,17 +914,40 @@ Prompt rules in `src/logic.js`:
 - Do not invent work, people, dates, hours, or blockers.
 - The heading is the member name.
 - Each source line keeps its `[YYYY-MM-DD]` tag.
+- Include every logged date. Include Saturday, Sunday, and holidays when the source has them.
+- Write the outcomes in date order. The earliest date comes first.
+- Write one short sentence for each distinct outcome. Use the simple past. Use the active voice. Make the member the subject.
+- Use 25 words or fewer in each sentence. Do not use a semicolon.
 - Do not restate every daily line.
-- Write one bullet for each member.
+- Write one bullet for each member, then the outcome lines under that name.
 - Do not omit a member.
 - Never write a `<users/…>` token.
+
+A member section looks like this:
+
+```text
+• Ada
+On 2026-10-17, Ada fixed the export.
+On 2026-10-18, Ada checked the logs.
+Blocker: staging is down.
+```
+
+The first line names the member. Each later line is one outcome. The dates run from earliest to latest. Saturday and Sunday stay in this section.
+
+`chunkChatByMember` packs those sections into Chat messages:
+
+```javascript
+Logic.chunkChatByMember(message, 3500);
+```
+
+3500 characters is under the Google Chat text limit of 4096. If the next member does not fit, that whole member starts the next message. The function does not put the first outcomes in one message and the rest in the next message. One member is also one model call. A long week is split between members, not inside one member.
 
 `buildWeeklyChatMessage` still checks the summary.
 It appends a member when that full name is absent.
 A block with no member name is not appended.
-The source limit is 24000 characters.
-The summary limit is 4000 characters.
-The request `max_tokens` value is 1200.
+The source limit is 12000 characters per call. Further members go in the next call. One member's notes are not cut to fit that limit.
+The summary safety rail is 5500 characters. A longer reply is treated as incomplete and split between members. It is not posted with `…[truncated]`.
+`max_tokens` is 100 plus 120 per member in that call, and at most 6 members (820 tokens).
 
 ---
 
@@ -919,7 +957,7 @@ The request `max_tokens` value is 1200.
 |---|---|
 | When someone joins/leaves a space | Edit Team E → **Apply Team spaces to reminder matrix** |
 | When a new project space appears | Chat Spaces row + webhook property + Team E + matrix sync |
-| After pulling code changes | `npm test` → `npm run push` → reload sheet |
+| After pulling code changes | `npm test` → `npm run push` → reload the sheet → **Apply schedules from sheet** |
 | If Monday summary looks wrong | Check Weekly Space Summaries, Executions, OpenRouter free model availability |
 | Quarterly | Check Chat Spaces Configured against Script Properties. Check that the Cloud project is still the default. |
 | Never | Do not commit Script Property values. Do not switch the Cloud project. Do not enable the Chat API. |
@@ -942,12 +980,16 @@ The request `max_tokens` value is 1200.
 | Ping shows `user/human/...` | Wrong Chat column format | Use `<users/digits>` |
 | Posts land in wrong space | Webhook URL space id ≠ column B | Delete webhook; recreate in correct space |
 | Weekly Chat is raw member dumps | No key, disabled, retired model ids, or every free model failed | **Set OpenRouter API key**. Check `OPENROUTER_ENABLED`. Read Executions. An empty **Weekly Space Summaries** cell means the model did not return text. |
+| A Saturday, Sunday, or holiday log never reaches Chat | The Schedules **Daily post** days cell is a custom list that omits that day | The old default `Mon,Tue,Wed,Thu,Fri` is widened to all seven days on the next daily run. A custom list is not changed. Set the days to `Mon,Tue,Wed,Thu,Fri,Sat,Sun` and run **Apply schedules from sheet**. The 19:00 job posts a row only when its date is today. |
+| A member's weekly summary is split across two Chat messages | The old packer cut the text at 3500 characters | Current code keeps each member section in one message. The next member starts the next message. |
 | A member has rows, but the 19:00 post skips them | The person was not on Team yet, the tab name differs, Date is not today, Summary is empty, or Space is blank or different | Add the person on Team before 19:00. Match the tab name to column A. Set today's date, a Summary, and Space from the dropdown. |
-| Monday Chat omits a member who is on Weekly Rollup | The model summary left that name out | Current code appends that member's week text under the summary. The stored LLM cell can still omit the name. |
+| Monday Chat shows `…[truncated]` and then raw day-by-day notes | The summary was cut at the old 4000-character cap, and names past the cut were appended raw | Push the current script and run **Run weekly roll-up now** only if you want every space from that week posted again. A stored cell that contains `…[truncated]` or misses a member is generated again. |
+| Monday Chat omits a member who is on Weekly Rollup | The summary calls left that name out | The post appends that member's week text. The next run generates the stored cell again when the name is missing. |
 | OpenRouter HTTP 404 on llama-3.3, deepseek-v4-flash, or qwen3.8-27b `:free` | Those free ids were removed from the catalog | Current code skips them and calls `openrouter/free` last. **Set OpenRouter API key** stores the new defaults |
 | OpenRouter HTTP 402 / paid model | Non-free id in property | **Set OpenRouter API key** to reset the free list. Paid ids are ignored |
 | One bad cell stops a member, or stops the daily or weekly Chat post | A formula error such as `#REF!` made the whole sheet read throw | The job reads columns A through G. A bad data cell skips that row. A bad GitHub Issues cell skips that cell and logs the sheet name and row number. Other rows, other members, the roll-up, and the other Chat posts continue |
 | GitHub Issues still shows a long URL | The URL is not a recognized issue link, the date is not in the format pass, or Apply schedules has not installed the hourly trigger | Use an issue-page URL or a project URL that contains `issue=owner|repo|number`. Separate several URLs with a comma, space, new line, semicolon, or pipe. Run **Format today’s GitHub issues** for today. Run **Apply schedules from sheet** once so the hourly trigger exists. Monday’s roll-up formats the previous week. |
+| Two issue numbers became one date, and the links disappeared | Sheets read a display such as `9, 10` as 10 Sep of the current year | Paste the URLs again. Run **Format today’s GitHub issues** after the plain-text formatter is on Google. That run also installs the hourly trigger if it is missing. |
 | Only PRJ_VOX gets Chat posts. Other spaces stay silent. Executions still show Completed. | The stored webhook used `&amp;` in place of `&`. Chat then returned HTTP 403. The script logged the failure and continued. | Store a normal `&` between `key` and `token`. The script also decodes `&amp;` on read. Run **Test Chat webhooks** and check that every space returns OK. |
 | Consent loop every week | Script moved to standard GCP Testing | Stop. See ADR-001 |
 | `getUi()` error in Executions | Headless run called alert / `onOpen` | Run `provisionRosterSpacesAndSheets` or `*_` trigger helpers |

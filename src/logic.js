@@ -216,21 +216,36 @@ var Logic = {
     return { headers: ['Member'].concat(spaceNames), grid: grid };
   },
 
-  MAX_WEEKLY_SOURCE_CHARS: 24000,
-  MAX_WEEKLY_SUMMARY_CHARS: 4000,
+  // Per request. A larger week is split into batches so the last members are still sent.
+  MAX_WEEKLY_SOURCE_CHARS: 12000,
+  // Above the per-call token budget, so a finished reply is not sliced mid-bullet.
+  MAX_WEEKLY_SUMMARY_CHARS: 5500,
+  MAX_MEMBERS_PER_WEEKLY_CALL: 6,
 
   WEEKLY_SUMMARY_SYSTEM:
-    'You write a short weekly progress summary for one Google Chat space. ' +
+    'You write a weekly progress summary for one Google Chat space. ' +
     'Use only the provided text. Do not invent work, people, dates, hours, or blockers. ' +
-    'Each update is tagged [YYYY-MM-DD]. Attribute work to the member name on its heading. ' +
+    'Each update is tagged [YYYY-MM-DD]. The heading is the member name. ' +
+    'Include every logged date. Include Saturday, Sunday, and holidays when the source has them. ' +
+    'Do not skip a date. ' +
+    'Write one bullet for each member. Do not omit a member. ' +
+    'Start the bullet with "• " and the exact member name. ' +
+    'On the following lines, write the outcomes in date order. The earliest date comes first. ' +
+    'Write one short sentence for each distinct outcome. ' +
+    'Use the simple past. Use the active voice. Make the member the subject of each sentence. ' +
+    'Use 25 words or fewer in each sentence. ' +
+    'Do not restate every daily line. Do not copy the source. ' +
+    'Add one blocker sentence when the source states a blocker. ' +
+    'Do not use a semicolon. ' +
     'Never output a <users/...> token or a numeric user id. ' +
-    'Write one bullet for each member in the source. Do not omit a member. ' +
-    'Do not restate every daily line. Put that member\'s work in the one bullet. ' +
-    'Name a blocker only when the source states one. ' +
-    'Output plain text only. Each bullet starts with "• ". No markdown headings.\n' +
-    'Example input: Ada / [2026-09-14] shipped login / [2026-09-15] fixed export. Blockers: staging.\n' +
+    'Output plain text only. No markdown headings.\n' +
+    'Example input: Ada / [2026-10-16] shipped login / [2026-10-17] fixed export / [2026-10-18] checked logs. Blockers: staging.\n' +
     'Example output:\n' +
-    '• Ada shipped login on 2026-09-14 and fixed export on 2026-09-15. Blocker: staging.',
+    '• Ada\n' +
+    'On 2026-10-16, Ada shipped the login.\n' +
+    'On 2026-10-17, Ada fixed the export.\n' +
+    'On 2026-10-18, Ada checked the logs.\n' +
+    'Blocker: staging is down.',
 
   truncateText: function (text, maxChars) {
     var raw = String(text || '');
@@ -290,13 +305,15 @@ var Logic = {
     return Logic.stripChatMentions_(String((block && block.text) || ''));
   },
 
-  buildWeeklySummaryUserPrompt: function (spaceName, weekStartYmd, weekEndYmd, memberBlocks) {
+  weeklySummarySourceText: function (spaceName, weekStartYmd, weekEndYmd, memberBlocks) {
     var lines = [
       'Space: ' + String(spaceName || '').trim(),
       'Week: ' + String(weekStartYmd || '') + ' to ' + String(weekEndYmd || ''),
       '',
       'Member updates. Each line is tagged [YYYY-MM-DD]. ' +
-        'The heading is the member name. Summarize the week from these updates:',
+        'The heading is the member name. The lines are in date order. ' +
+        'Keep that order. Include Saturday, Sunday, and holidays when they are present. ' +
+        'Write one short section per member for the whole week:',
       ''
     ];
     (memberBlocks || []).forEach(function (block) {
@@ -304,7 +321,177 @@ var Logic = {
       lines.push(Logic.formatMemberUpdatesForPrompt_(block));
       lines.push('');
     });
-    return Logic.truncateText(lines.join('\n').trim(), Logic.MAX_WEEKLY_SOURCE_CHARS);
+    return lines.join('\n').trim();
+  },
+
+  buildWeeklySummaryUserPrompt: function (spaceName, weekStartYmd, weekEndYmd, memberBlocks) {
+    return Logic.weeklySummarySourceText(spaceName, weekStartYmd, weekEndYmd, memberBlocks);
+  },
+
+  ymdInInclusiveRange: function (ymd, startYmd, endYmd) {
+    var day = String(ymd || '');
+    var start = String(startYmd || '');
+    var end = String(endYmd || '');
+    if (!day || !start || !end) return false;
+    return day >= start && day <= end;
+  },
+
+  /**
+   * The stock weekday list is widened so a Saturday, Sunday, or holiday log is posted that day.
+   * A custom day list is left as the operator saved it.
+   */
+  dailyPostDays: function (stored) {
+    var text = String(stored || '').trim();
+    if (text === 'Mon,Tue,Wed,Thu,Fri') return 'Mon,Tue,Wed,Thu,Fri,Sat,Sun';
+    return text;
+  },
+
+  CHAT_MESSAGE_CHARS: 3500,
+
+  chatMemberBlocks_: function (text) {
+    var header = [];
+    var blocks = [];
+    var current = null;
+    String(text || '').split('\n').forEach(function (line) {
+      if (/^• /.test(line)) {
+        if (current) blocks.push(current.join('\n').replace(/\s+$/, ''));
+        current = [line];
+        return;
+      }
+      if (current) current.push(line);
+      else header.push(line);
+    });
+    if (current) blocks.push(current.join('\n').replace(/\s+$/, ''));
+    return {
+      header: header.join('\n').replace(/\s+$/, ''),
+      blocks: blocks.filter(function (block) { return block.length; })
+    };
+  },
+
+  fitMemberBlock: function (block, maxLen) {
+    var text = String(block || '').trim();
+    var limit = Number(maxLen);
+    if (!limit || text.length <= limit) return text;
+    var slice = text.slice(0, limit);
+    var sentence = Math.max(slice.lastIndexOf('.'), slice.lastIndexOf('!'), slice.lastIndexOf('?'));
+    if (sentence >= 8) return slice.slice(0, sentence + 1).trim();
+    var lineBreak = slice.lastIndexOf('\n');
+    if (lineBreak > 0) return slice.slice(0, lineBreak).trim();
+    var space = slice.lastIndexOf(' ');
+    if (space > 8) return slice.slice(0, space).trim();
+    return slice.trim();
+  },
+
+  chunkPlainChatText_: function (text, maxLen) {
+    var src = String(text || '');
+    var limit = Number(maxLen);
+    if (!src) return [''];
+    if (!limit || src.length <= limit) return [src];
+    var parts = [];
+    var buf = '';
+    src.split('\n').forEach(function (line) {
+      var next = buf ? (buf + '\n' + line) : line;
+      if (next.length > limit) {
+        if (buf) parts.push(buf);
+        buf = line.length > limit ? line.slice(0, limit) : line;
+      } else {
+        buf = next;
+      }
+    });
+    if (buf) parts.push(buf);
+    return parts.length ? parts : [src.slice(0, limit)];
+  },
+
+  continuationHeader_: function (header) {
+    var line = String(header || '').split('\n')[0];
+    if (!line || /^• /.test(line)) return '';
+    if (line.charAt(0) === '*' && line.charAt(line.length - 1) === '*') {
+      return line.slice(0, -1) + ' (continued)*';
+    }
+    return line + ' (continued)';
+  },
+
+  /**
+   * Pack Chat text so one member section stays in one message.
+   * A section starts with "• ". Later lines belong to that member.
+   * If the next member does not fit, that member starts the next message.
+   */
+  chunkChatByMember: function (text, maxLen) {
+    var limit = Number(maxLen) > 0 ? Number(maxLen) : Logic.CHAT_MESSAGE_CHARS;
+    var src = String(text || '');
+    if (!src) return [''];
+    if (src.length <= limit) return [src];
+    if (!/(^|\n)• /.test(src)) return Logic.chunkPlainChatText_(src, limit);
+    var parsed = Logic.chatMemberBlocks_(src);
+    var cont = Logic.continuationHeader_(parsed.header);
+    var chunks = [];
+    var buf = parsed.header;
+    function pushBuf() {
+      if (String(buf || '').trim()) chunks.push(String(buf).replace(/\n+$/, ''));
+      buf = '';
+    }
+    parsed.blocks.forEach(function (block) {
+      var candidate = buf ? (buf + '\n' + block) : block;
+      if (candidate.length <= limit) {
+        buf = candidate;
+        return;
+      }
+      if (buf) pushBuf();
+      var withCont = chunks.length && cont ? (cont + '\n' + block) : block;
+      if (withCont.length <= limit) {
+        buf = withCont;
+        return;
+      }
+      if (block.length <= limit) {
+        buf = block;
+        return;
+      }
+      buf = Logic.fitMemberBlock(block, limit);
+    });
+    pushBuf();
+    return chunks.length ? chunks : [Logic.fitMemberBlock(src, limit)];
+  },
+
+  /**
+   * Groups members so each model call can finish. Every member stays in one batch.
+   * A single long member is alone and is not split across calls.
+   */
+  planWeeklySummaryBatches: function (memberBlocks, spaceName, weekStartYmd, weekEndYmd) {
+    var cap = Logic.MAX_WEEKLY_SOURCE_CHARS;
+    var maxMembers = Logic.MAX_MEMBERS_PER_WEEKLY_CALL;
+    var space = spaceName || 'S';
+    var start = weekStartYmd || '2026-01-05';
+    var end = weekEndYmd || '2026-01-11';
+    var batches = [];
+    var current = [];
+    function sourceLen(group) {
+      return Logic.weeklySummarySourceText(space, start, end, group).length;
+    }
+    (memberBlocks || []).forEach(function (block) {
+      if (!current.length) {
+        current = [block];
+        return;
+      }
+      var next = current.concat([block]);
+      if (next.length > maxMembers || sourceLen(next) > cap) {
+        batches.push(current);
+        current = [block];
+        return;
+      }
+      current = next;
+    });
+    if (current.length) batches.push(current);
+    return batches;
+  },
+
+  /**
+   * Tokens for one short bullet per member in this call, with slack so the last bullet can finish.
+   */
+  weeklySummaryMaxTokens: function (memberCount) {
+    var n = Number(memberCount);
+    if (!n || n < 1) n = 1;
+    var capped = Math.min(Math.floor(n), Logic.MAX_MEMBERS_PER_WEEKLY_CALL);
+    return 100 + capped * 120;
   },
 
   extractOpenRouterText: function (payload) {
@@ -324,12 +511,90 @@ var Logic = {
   },
 
   sanitizeWeeklySummary: function (text) {
-    var cleaned = Logic.stripChatMentions_(String(text || ''))
+    return Logic.stripChatMentions_(String(text || ''))
       .replace(/\r\n/g, '\n')
       .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n?…\[truncated\]/g, '')
       .trim();
+  },
+
+  weeklySummaryEndsClean_: function (text) {
+    return /[.!?]["')\]]?\s*$/.test(String(text || '').trim());
+  },
+
+  trimIncompleteWeeklyBullet: function (text) {
+    var cleaned = Logic.sanitizeWeeklySummary(text);
     if (!cleaned) return '';
-    return Logic.truncateText(cleaned, Logic.MAX_WEEKLY_SUMMARY_CHARS);
+    if (Logic.weeklySummaryEndsClean_(cleaned)) return cleaned;
+    var idx = Math.max(cleaned.lastIndexOf('.'), cleaned.lastIndexOf('!'), cleaned.lastIndexOf('?'));
+    if (idx >= 8) return cleaned.slice(0, idx + 1).trim();
+    var space = cleaned.lastIndexOf(' ');
+    if (space > 8) return cleaned.slice(0, space).trim();
+    return cleaned;
+  },
+
+  fitWeeklySummaryText: function (text) {
+    var cleaned = Logic.sanitizeWeeklySummary(text);
+    if (!cleaned) return { text: '', cut: false };
+    if (cleaned.length <= Logic.MAX_WEEKLY_SUMMARY_CHARS) return { text: cleaned, cut: false };
+    var slice = cleaned.slice(0, Logic.MAX_WEEKLY_SUMMARY_CHARS);
+    var breakAt = slice.lastIndexOf('\n• ');
+    if (breakAt > 0) return { text: slice.slice(0, breakAt).trim(), cut: true };
+    return { text: Logic.trimIncompleteWeeklyBullet(slice), cut: true };
+  },
+
+  ensureSingleMemberName_: function (text, blocks) {
+    if (!blocks || blocks.length !== 1) return text;
+    var name = String((blocks[0] && blocks[0].member) || '').trim();
+    if (!name) return text;
+    if (String(text || '').toLowerCase().indexOf(name.toLowerCase()) >= 0) return text;
+    var body = String(text || '').replace(/^•\s*/, '').trim();
+    return body ? ('• ' + name + ' ' + body) : ('• ' + name);
+  },
+
+  readOpenRouterCompletion: function (payload) {
+    var choice = (payload && payload.choices && payload.choices[0]) || {};
+    var reason = String(choice.finish_reason || choice.native_finish_reason || '').toLowerCase();
+    return {
+      text: Logic.extractOpenRouterText(payload),
+      truncated: reason === 'length'
+    };
+  },
+
+  /**
+   * accept: the reply can be posted.
+   * split: the reply was cut or skipped a member. The caller summarizes smaller groups.
+   */
+  interpretWeeklySummaryAttempt: function (rawText, finishTruncated, memberBlocks) {
+    var blocks = memberBlocks || [];
+    var fitted = Logic.fitWeeklySummaryText(rawText);
+    var single = blocks.length <= 1;
+    var missing = Logic.membersOmittedFromSummary_(fitted.text, blocks);
+    var cutOff = fitted.cut || (!!finishTruncated && !Logic.weeklySummaryEndsClean_(fitted.text));
+    if (!fitted.text) return { action: single ? 'accept' : 'split', text: '' };
+    if (!cutOff && !missing.length) {
+      return { action: 'accept', text: Logic.ensureSingleMemberName_(fitted.text, blocks) };
+    }
+    if (single) {
+      return {
+        action: 'accept',
+        text: Logic.ensureSingleMemberName_(Logic.trimIncompleteWeeklyBullet(fitted.text), blocks)
+      };
+    }
+    return { action: 'split', text: '' };
+  },
+
+  joinWeeklySummaryBullets: function (parts) {
+    return (parts || []).map(function (part) {
+      return String(part || '').trim();
+    }).filter(Boolean).join('\n');
+  },
+
+  weeklyStoredSummaryIsUsable: function (summary, memberBlocks) {
+    var raw = String(summary || '');
+    if (!raw.trim()) return false;
+    if (raw.indexOf('…[truncated]') >= 0) return false;
+    return Logic.membersOmittedFromSummary_(raw, memberBlocks).length === 0;
   },
 
   /**
@@ -442,14 +707,17 @@ var Logic = {
   },
 
   /**
-   * Summaries are short. effort "none" keeps the reply in message.content
-   * instead of spending max_tokens on reasoning and returning empty content.
+   * Summaries are one short bullet per member. effort "none" keeps the reply
+   * in message.content instead of spending max_tokens on reasoning.
+   * maxTokens is the budget for this batch, from weeklySummaryMaxTokens.
    */
-  openRouterChatBody: function (model, systemPrompt, userPrompt) {
+  openRouterChatBody: function (model, systemPrompt, userPrompt, maxTokens) {
+    var tokens = Number(maxTokens);
+    if (!tokens || tokens < 1) tokens = Logic.weeklySummaryMaxTokens(1);
     return {
       model: model,
       temperature: 0.2,
-      max_tokens: 1200,
+      max_tokens: tokens,
       reasoning: { effort: 'none' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -570,6 +838,19 @@ var Logic = {
     });
     var rewrite = issues.length > 0 && !(String(text || '') === display && sameLinks);
     return { issues: issues, display: display, rewrite: rewrite };
+  },
+
+  githubIssueLinkSpans: function (issues) {
+    var spans = [];
+    var cursor = 0;
+    (issues || []).forEach(function (issue, index) {
+      if (!issue) return;
+      if (index > 0) cursor += 2;
+      var label = String(issue.number);
+      spans.push({ start: cursor, end: cursor + label.length, url: issue.url });
+      cursor += label.length;
+    });
+    return spans;
   },
 
   formatDailyUpdateLine: function (summary, hoursText, blockers, issueUrls) {

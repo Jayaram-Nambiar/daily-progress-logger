@@ -6,7 +6,7 @@ Status: approved design, pending spec review
 
 ## Problem
 
-Each team member logs daily work on a personal sheet: Date, Summary, Hours, Blockers, Tomorrow Plan, Space. The weekday 19:00 Google Chat post sends one summary line per row that has a Summary and a Space. Monday 09:00 posts a weekly roll-up for the previous Monday–Sunday week.
+Each team member logs daily work on a personal sheet: Date, Summary, Hours, Blockers, Tomorrow Plan, Space. The 19:00 Google Chat post sends one summary line per row that has a Summary and a Space. It runs every day, including Saturday, Sunday, and a holiday. Monday 09:00 posts a weekly roll-up for the previous Monday–Sunday week.
 
 Members need a place to attach the GitHub issues that belong to a row. The same issue shows up as more than one URL. Several issues may be pasted into one cell, separated by commas, spaces, newlines, semicolons, pipes, or similar characters. The sheet should show the issue numbers, each linked to one canonical issue URL. The daily Chat post should include those canonical URLs on the summary line.
 
@@ -83,12 +83,14 @@ All dates use Asia/Kolkata.
 |---|---|---|
 | Hourly trigger | Date equals today | None |
 | **Format today’s GitHub issues** menu | Date equals today | None |
-| Start of the weekday 19:00 daily post, and **Post today’s updates now** | Date equals today | Daily post, after formatting |
+| Start of the 19:00 daily post, and **Post today’s updates now** | Date equals today, including Saturday, Sunday, and a holiday | Daily post, after formatting |
 | Start of the Monday 09:00 roll-up, and **Run weekly roll-up now** | Date falls in the previous Monday–Sunday week, using the existing week bounds | Weekly post is unchanged. Issue URLs are not added to the weekly message or the weekly summary prompt. |
 
 Rows with a blank or unparseable date are skipped. The hourly trigger also runs on weekends; it only rewrites today’s issue cells and does not post.
 
-**Apply schedules from sheet** installs the hourly trigger and deletes any previous copy of that same trigger so copies do not stack. Apps Script may start the hourly job late. The format pass at the start of the daily post and the Monday roll-up is the pass those jobs rely on.
+**Apply schedules from sheet** installs the hourly trigger and deletes any previous copy of that same trigger so copies do not stack. **Format today’s GitHub issues**, the daily post, and the Monday roll-up install that same hourly trigger when it is missing. They do not change the other clock triggers. Apps Script may start the hourly job late. The format pass at the start of the daily post and the Monday roll-up is the pass those jobs rely on.
+
+Column G is stored as plain text. A display such as `9, 10` is otherwise read as 10 September of the current year, and that date value drops every link.
 
 The hourly handler is separate from the Schedules sheet clock-time rows. Reminder, daily post, weekly roll-up, and space access keep their current hours.
 

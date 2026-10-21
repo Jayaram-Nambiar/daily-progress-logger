@@ -16,9 +16,11 @@
  * Spaces column: multi-select chip dropdown from Chat Spaces!A2:A.
  * Menu "Apply Team spaces to reminder matrix" applies column E to the matrix.
  * Monday weekly posts may send an OpenRouter summary per configured
- * webhook space when OPENROUTER_API_KEY is set. The summary must name
- * every member who had updates. A member the model omits is appended.
- * If every model fails, the post is that space's member text. Default models:
+ * webhook space when OPENROUTER_API_KEY is set. Each member with updates
+ * gets one short bullet. A long week is split across calls so the reply
+ * is not cut off. A stored summary that was cut off is generated again.
+ * A member still missing is appended. If every model fails, the post is
+ * that space's member text. Default models:
  * google/gemma-4-31b-it:free then google/gemma-4-26b-a4b-it:free, then openrouter/free.
  * The script never calls the Google Chat API and stays on the default GCP project.
  * Webhook URLs and API keys are Script Properties, not source.
@@ -48,7 +50,7 @@ const TEAM_HEADERS = ['Name', 'Slack', 'Email', 'Chat'];
 const SCHEDULE_HEADERS = ['Job', 'Enabled', 'Days', 'Hour', 'Minute'];
 const SCHEDULE_DEFAULTS = [
   ['Reminder', true, 'Mon,Tue,Wed,Thu,Fri', 18, 0],
-  ['Daily post', true, 'Mon,Tue,Wed,Thu,Fri', 19, 0],
+  ['Daily post', true, 'Mon,Tue,Wed,Thu,Fri,Sat,Sun', 19, 0],
   ['Weekly roll-up', true, 'Mon', 9, 0],
   ['Space access', true, 'Mon,Tue,Wed,Thu,Fri', 8, 0]
 ];
@@ -222,7 +224,9 @@ function syncOneMember_(name) {
   safeSetNumberFormat_(sh, 'A2:A', 'yyyy-mm-dd');
   sh.getRange('B2:B').setWrap(true);
   const issueCol = MEMBER_HEADERS.indexOf('GitHub Issues') + 1;
-  sh.getRange(2, issueCol, Math.max(sh.getMaxRows() - 1, 1), 1).setWrap(true);
+  const issueBody = sh.getRange(2, issueCol, Math.max(sh.getMaxRows() - 1, 1), 1);
+  issueBody.setWrap(true);
+  setPlainText_(issueBody);
   MEMBER_HEADERS.forEach((h, i) => sh.getRange(1, i + 1).setNote(HEADER_NOTES[h] || ''));
   applySpaceDropdown_(sh);
   autoResize_(sh);
@@ -235,21 +239,41 @@ function ensureMemberIssueColumn_(sh) {
   const missingHeader = current !== header;
   if (missingHeader) sh.getRange(1, col).setValue(header).setFontWeight('bold');
   sh.getRange(1, col).setNote(HEADER_NOTES[header] || '');
-  sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1).setWrap(true);
+  const issueBody = sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1);
+  issueBody.setWrap(true);
+  setPlainText_(issueBody);
   if (missingHeader) applyTableLook_(sh, MEMBER_HEADERS.length);
 }
 
+function setPlainText_(range) {
+  try {
+    range.setNumberFormat('@');
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    if (msg.indexOf('typed column') === -1) throw e;
+  }
+}
+
 function writeGithubIssueCell_(range, plan) {
+  // Sheets reads "9, 10" as 10 Sep and drops every link. Plain text keeps each number linked.
+  setPlainText_(range);
   const builder = SpreadsheetApp.newRichTextValue().setText(plan.display);
-  let cursor = 0;
-  plan.issues.forEach((issue, index) => {
-    if (index > 0) cursor += 2;
-    const start = cursor;
-    const end = start + String(issue.number).length;
-    builder.setLinkUrl(start, end, issue.url);
-    cursor = end;
+  Logic.githubIssueLinkSpans(plan.issues).forEach(span => {
+    builder.setLinkUrl(span.start, span.end, span.url);
   });
   range.setRichTextValue(builder.build());
+}
+
+function ensureGithubIssuesTrigger_() {
+  try {
+    const handler = 'formatGithubIssues_trigger';
+    const existing = ScriptApp.getProjectTriggers().filter(trigger => trigger.getHandlerFunction() === handler);
+    if (existing.length === 1) return;
+    existing.forEach(trigger => ScriptApp.deleteTrigger(trigger));
+    ScriptApp.newTrigger(handler).timeBased().everyHours(1).create();
+  } catch (e) {
+    console.error('GitHub issues trigger was not installed: ' + errorMessage_(e));
+  }
 }
 
 function formatGithubIssuesOnSheet_(sh, ymdSet) {
@@ -317,6 +341,7 @@ function formatGithubIssuesForToday_() {
 }
 
 function formatTodaysGithubIssues() {
+  ensureGithubIssuesTrigger_();
   const result = formatGithubIssuesForToday_();
   const ui = SpreadsheetApp.getUi();
   if (result.missingTeam) {
@@ -608,6 +633,12 @@ function ensureSchedulesSheet_() {
   SCHEDULE_DEFAULTS.forEach(row => {
     if (!known[row[0]]) sh.appendRow(row);
   });
+  const dailyRow = known['Daily post'];
+  if (dailyRow) {
+    const currentDays = String(sh.getRange(dailyRow, 3).getValue() || '').trim();
+    const nextDays = Logic.dailyPostDays(currentDays);
+    if (nextDays && nextDays !== currentDays) sh.getRange(dailyRow, 3).setValue(nextDays);
+  }
   const body = Math.max(sh.getLastRow() - 1, 1);
   sh.getRange(2, 2, body, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireCheckbox().build());
   sh.getRange(1, 3).setNote('Comma-separated: Mon,Tue,Wed,Thu,Fri,Sat,Sun');
@@ -666,7 +697,7 @@ function installSchedulesFromSheet_() {
     }
     ScriptApp.newTrigger(handler).timeBased().atHour(check.hour).nearMinute(check.minute).everyDays(1).create();
   });
-  ScriptApp.newTrigger('formatGithubIssues_trigger').timeBased().everyHours(1).create();
+  ensureGithubIssuesTrigger_();
 }
 
 function installOperationalTriggers_() {
@@ -692,7 +723,7 @@ function applySchedulesFromMenu() {
 
 function promptSchedule_(jobName) {
   const ui = SpreadsheetApp.getUi();
-  const daysResp = ui.prompt(jobName + ' days', 'Comma-separated weekdays, such as Mon,Tue,Wed,Thu,Fri. Cancel aborts.', ui.ButtonSet.OK_CANCEL);
+  const daysResp = ui.prompt(jobName + ' days', 'Comma-separated days, such as Mon,Tue,Wed,Thu,Fri,Sat,Sun. Cancel aborts.', ui.ButtonSet.OK_CANCEL);
   if (daysResp.getSelectedButton() !== ui.Button.OK) return;
   const hourResp = ui.prompt(jobName + ' hour', 'Whole hour from 0 to 23, Asia/Kolkata. Cancel aborts.', ui.ButtonSet.OK_CANCEL);
   if (hourResp.getSelectedButton() !== ui.Button.OK) return;
@@ -841,6 +872,7 @@ function postDailyUpdatesToChat() {
 }
 
 function postDailyUpdatesToChat_trigger() {
+  ensureSchedulesSheet_();
   if (!scheduleAllows_('Daily post')) return;
   postDailyUpdatesToChat_({ silent: true });
 }
@@ -854,6 +886,7 @@ function postDailyUpdatesToChat_(opts) {
     if (!silent) SpreadsheetApp.getUi().alert('Team or Chat Spaces sheet is missing.');
     return;
   }
+  ensureGithubIssuesTrigger_();
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
   try {
     formatGithubIssuesForYmds_([today]);
@@ -1130,30 +1163,16 @@ function isChatWebhookUrl_(url) {
 }
 
 function chunkChatText_(text, maxLen) {
-  const src = (text || '').toString();
-  if (src.length <= maxLen) return [src];
-  const parts = [];
-  let buf = '';
-  src.split('\n').forEach(line => {
-    const next = buf ? `${buf}\n${line}` : line;
-    if (next.length > maxLen) {
-      if (buf) parts.push(buf);
-      buf = line.length > maxLen ? line.slice(0, maxLen) : line;
-    } else {
-      buf = next;
-    }
-  });
-  if (buf) parts.push(buf);
-  return parts.length ? parts : [src.slice(0, maxLen)];
+  return Logic.chunkChatByMember(text, maxLen);
 }
 
-/* -------------------- Daily POST (8:30 PM IST, weekdays) -------------------- */
+/* -------------------- Daily POST (19:00 IST, every day) -------------------- */
 
 function installDailyTrigger_2030IST() {
   const fn = 'postTodaysSummary_trigger';
   ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === fn).forEach(ScriptApp.deleteTrigger);
   ScriptApp.newTrigger(fn).timeBased().atHour(20).nearMinute(30).everyDays(1).create();
-  SpreadsheetApp.getUi().alert('Installed daily post ~8:30 PM IST (skips weekends automatically).');
+  SpreadsheetApp.getUi().alert('Installed daily post ~8:30 PM IST. A logged row is posted on that calendar day, including Saturday, Sunday, and a holiday.');
 }
 
 function removeDailyTriggers() {
@@ -1163,17 +1182,15 @@ function removeDailyTriggers() {
   SpreadsheetApp.getUi().alert(`Removed ${n} daily post trigger(s).`);
 }
 
-function postTodaysSummary() { return postTodaysSummary_({ silent: false, respectWeekend: false }); }
-function postTodaysSummary_trigger() { return postTodaysSummary_({ silent: true, respectWeekend: true }); }
+function postTodaysSummary() { return postTodaysSummary_({ silent: false }); }
+function postTodaysSummary_trigger() { return postTodaysSummary_({ silent: true }); }
 
 function postTodaysSummary_(opts) {
   const silent = !!opts?.silent;
-  const respectWeekend = opts?.respectWeekend !== false;
   if (!SLACK_ENABLED) {
     if (!silent) SpreadsheetApp.getUi().alert('Slack posting is disabled. The 6:00 PM reminder and the Monday roll-up go to Google Chat.');
     return;
   }
-  if (respectWeekend && isWeekendIST_()) return; // skip weekends
 
   const webhook = PropertiesService.getScriptProperties().getProperty(PROP_KEYS.WEBHOOK);
   if (!webhook) { if (!silent) SpreadsheetApp.getUi().alert('Slack webhook URL not set.'); return; }
@@ -1416,6 +1433,7 @@ function weeklyCollatePreviousWeek_(opts) {
   const team = ss.getSheetByName(SHEETS.TEAM);
   if (!team) { if (!silent) SpreadsheetApp.getUi().alert('Team sheet not found.'); return; }
 
+  ensureGithubIssuesTrigger_();
   const { weekStartYMD, weekEndYMD } = getPreviousWeekRangeIST_();
   try {
     formatGithubIssuesForYmds_(Logic.datesInRange(weekStartYMD, weekEndYMD));
@@ -1438,7 +1456,7 @@ function weeklyCollatePreviousWeek_(opts) {
     if (parsed.skipped) console.error('Weekly roll-up skipped ' + parsed.skipped + ' row(s) for ' + member.name);
     parsed.values.forEach(item => {
       const rowYMD = item.date;
-      if (!rowYMD || rowYMD < weekStartYMD || rowYMD > weekEndYMD) return;
+      if (!Logic.ymdInInclusiveRange(rowYMD, weekStartYMD, weekEndYMD)) return;
       if (!item.summary || !item.space) return;
       let prettyDate = rowYMD;
       try {
@@ -1521,6 +1539,7 @@ function weeklyCollatePreviousWeek_(opts) {
   let summarized = 0;
   const skipped = [];
   const failures = [];
+  const rollupDeadline = Date.now() + 4 * 60 * 1000;
   spaceNames.forEach((spaceName, spaceIndex) => {
     try {
     const webhook = configured[spaceName];
@@ -1530,9 +1549,15 @@ function weeklyCollatePreviousWeek_(opts) {
     if (!Logic.hasWeeklyMemberContent(blocks)) return;
     const summaryKey = `${weekStartYMD}|${spaceName}`;
     let aiSummary = forceSummary ? '' : (summaryMap[summaryKey] || '');
+    if (aiSummary && !Logic.weeklyStoredSummaryIsUsable(aiSummary, blocks)) {
+      console.log('Weekly summary for ' + spaceName + ' was cut off or missed a member; generating again.');
+      aiSummary = '';
+    }
     if (!aiSummary && llmReady && !dryRun) {
       if (spaceIndex > 0) Utilities.sleep(1500);
-      aiSummary = summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD, blocks);
+      aiSummary = summarizeWeeklySpaceWithOpenRouter_(
+        spaceName, weekStartYMD, weekEndYMD, blocks, rollupDeadline
+      );
       if (aiSummary) {
         try {
           writeWeeklySpaceSummary_(summariesSheet, weekStartYMD, weekEndYMD, spaceName, aiSummary);
@@ -1673,7 +1698,7 @@ function setOpenRouterApiKey() {
   }
   ui.alert(
     'Saved OPENROUTER_API_KEY and free-tier models (' + DEFAULT_OPENROUTER_MODELS +
-      '). Monday weekly posts send one summary per configured space. A member the model omits is appended. If every model fails, the post is that space\'s member text.'
+      '). Monday weekly posts send one short bullet per member. A cut-off summary is generated again. A member still missing is appended. If every model fails, the post is that space\'s member text.'
   );
 }
 
@@ -1690,68 +1715,104 @@ function openRouterModelList_() {
 }
 
 /**
- * Returns sanitized summary text, or '' on any failure (caller posts member detail alone).
- * Tries free-tier OPENROUTER_MODEL ids in order.
- * Skips the API when the space has no previous-week member content (no tokens used).
+ * Returns one short bullet per member, or '' when every call fails
+ * (the caller then posts that space's member text).
+ * Skips the API when the space has no previous-week member content.
+ * A reply that stops early is not posted; that group is summarized again in smaller calls.
  */
-function summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD, memberBlocks) {
+function summarizeWeeklySpaceWithOpenRouter_(spaceName, weekStartYMD, weekEndYMD, memberBlocks, deadlineMs) {
   if (!Logic.hasWeeklyMemberContent(memberBlocks)) return '';
   const props = PropertiesService.getScriptProperties();
   const apiKey = String(props.getProperty(PROP_KEYS.OPENROUTER_KEY) || '').trim();
   if (!apiKey) return '';
   const models = openRouterModelList_();
   if (!models.length) return '';
-  const userPrompt = Logic.buildWeeklySummaryUserPrompt(spaceName, weekStartYMD, weekEndYMD, memberBlocks);
-  if (!String(userPrompt || '').trim()) return '';
-
   const headers = {
     Authorization: 'Bearer ' + apiKey,
     'HTTP-Referer': 'https://docs.google.com/spreadsheets/d/1NHSu_IvUWXnNJqyEbqnAydQ4joftWk6DP68RPQRgMX4',
     'X-Title': 'Daily Progress Logger weekly roll-up'
   };
+  const deadline = deadlineMs || (Date.now() + 4 * 60 * 1000);
+  const batches = Logic.planWeeklySummaryBatches(memberBlocks, spaceName, weekStartYMD, weekEndYMD);
+  const parts = [];
+  for (let b = 0; b < batches.length; b++) {
+    const part = summarizeWeeklyBatch_(
+      spaceName, weekStartYMD, weekEndYMD, batches[b], models, headers, deadline
+    );
+    if (part) parts.push(part);
+  }
+  return Logic.joinWeeklySummaryBullets(parts);
+}
 
+function summarizeWeeklyBatch_(spaceName, weekStartYMD, weekEndYMD, blocks, models, headers, deadlineMs) {
+  if (!blocks || !blocks.length) return '';
+  if (Date.now() > deadlineMs) {
+    console.error('Weekly summary time budget used before ' + spaceName + ' (' + blocks.length + ' members).');
+    return '';
+  }
+  const userPrompt = Logic.buildWeeklySummaryUserPrompt(spaceName, weekStartYMD, weekEndYMD, blocks);
+  if (!String(userPrompt || '').trim()) return '';
+  const maxTokens = Logic.weeklySummaryMaxTokens(blocks.length);
   for (let i = 0; i < models.length; i++) {
-    const model = models[i];
-    const body = Logic.openRouterChatBody(model, Logic.WEEKLY_SUMMARY_SYSTEM, userPrompt);
-    try {
-      let res = UrlFetchApp.fetch(OPENROUTER_URL, {
-        method: 'post',
-        contentType: 'application/json; charset=UTF-8',
-        headers: headers,
-        payload: JSON.stringify(body),
-        muteHttpExceptions: true
-      });
-      let code = res.getResponseCode();
-      if (code === 429 || code >= 500) {
-        Utilities.sleep(2500);
-        res = UrlFetchApp.fetch(OPENROUTER_URL, {
-          method: 'post',
-          contentType: 'application/json; charset=UTF-8',
-          headers: headers,
-          payload: JSON.stringify(body),
-          muteHttpExceptions: true
-        });
-        code = res.getResponseCode();
-      }
-      if (code < 200 || code >= 300) {
-        console.error(
-          'OpenRouter HTTP ' + code + ' model=' + model + ' space=' + spaceName + ': ' +
-            String(res.getContentText() || '').slice(0, 300)
-        );
-        continue;
-      }
-      const payload = JSON.parse(res.getContentText() || '{}');
-      const text = Logic.sanitizeWeeklySummary(Logic.extractOpenRouterText(payload));
-      if (text) return text;
-      console.error('OpenRouter empty content model=' + model + ' space=' + spaceName);
-    } catch (e) {
-      console.error(
-        'OpenRouter failed model=' + model + ' space=' + spaceName + ': ' +
-          ((e && e.message) ? e.message : e)
-      );
+    const attempt = fetchOpenRouterWeekly_(models[i], userPrompt, maxTokens, headers, spaceName);
+    if (!attempt || !String(attempt.text || '').trim()) {
+      if (attempt) console.error('OpenRouter empty content model=' + models[i] + ' space=' + spaceName);
+      continue;
     }
+    const decision = Logic.interpretWeeklySummaryAttempt(attempt.text, attempt.truncated, blocks);
+    if (decision.action === 'accept' && decision.text) return decision.text;
+    if (blocks.length <= 1) continue;
+    console.log(
+      'Weekly summary for ' + spaceName + ' was cut off at ' + blocks.length +
+      ' members on ' + models[i] + '; splitting.'
+    );
+    if (Date.now() > deadlineMs) return '';
+    const mid = Math.ceil(blocks.length / 2);
+    Utilities.sleep(800);
+    const left = summarizeWeeklyBatch_(
+      spaceName, weekStartYMD, weekEndYMD, blocks.slice(0, mid), models, headers, deadlineMs
+    );
+    Utilities.sleep(800);
+    const right = summarizeWeeklyBatch_(
+      spaceName, weekStartYMD, weekEndYMD, blocks.slice(mid), models, headers, deadlineMs
+    );
+    return Logic.joinWeeklySummaryBullets([left, right]);
   }
   return '';
+}
+
+function fetchOpenRouterWeekly_(model, userPrompt, maxTokens, headers, spaceName) {
+  const body = Logic.openRouterChatBody(model, Logic.WEEKLY_SUMMARY_SYSTEM, userPrompt, maxTokens);
+  const options = {
+    method: 'post',
+    contentType: 'application/json; charset=UTF-8',
+    headers: headers,
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  };
+  try {
+    let res = UrlFetchApp.fetch(OPENROUTER_URL, options);
+    let code = res.getResponseCode();
+    if (code === 429 || code >= 500) {
+      Utilities.sleep(2500);
+      res = UrlFetchApp.fetch(OPENROUTER_URL, options);
+      code = res.getResponseCode();
+    }
+    if (code < 200 || code >= 300) {
+      console.error(
+        'OpenRouter HTTP ' + code + ' model=' + model + ' space=' + spaceName + ': ' +
+          String(res.getContentText() || '').slice(0, 300)
+      );
+      return null;
+    }
+    return Logic.readOpenRouterCompletion(JSON.parse(res.getContentText() || '{}'));
+  } catch (e) {
+    console.error(
+      'OpenRouter failed model=' + model + ' space=' + spaceName + ': ' +
+        ((e && e.message) ? e.message : e)
+    );
+    return null;
+  }
 }
 
 function readConfiguredSpaces_(ss) {
@@ -1791,12 +1852,6 @@ function ymdToDate_(ymd) {
 }
 
 /* -------------------- Helpers -------------------- */
-
-function isWeekendIST_() {
-  const now = new Date();
-  const d = Utilities.formatDate(now, TZ, 'E'); // Mon..Sun
-  return d === 'Sat' || d === 'Sun';
-}
 
 function ensureTeamSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();

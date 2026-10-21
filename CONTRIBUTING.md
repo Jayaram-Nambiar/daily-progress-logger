@@ -24,8 +24,8 @@ node --check src/logic.js
 ## Pull requests
 
 - Explain why the behavior should change. Link an issue when there is one.
-- Update [docs/runbook.md](docs/runbook.md) or [docs/architecture.md](docs/architecture.md) when an operator step or a trust boundary changes.
-- A hard-to-reverse choice gets a new file in [docs/decisions/](docs/decisions/README.md). Do not delete a superseded record; point it at the replacement.
+- Update [README.md](README.md) and [docs/runbooks/spaces-roster-and-daily-posts.md](docs/runbooks/spaces-roster-and-daily-posts.md) when an operator step or a trust boundary changes.
+- A hard-to-reverse choice gets a new file in [docs/decisions/](docs/decisions/). Do not delete a superseded record; point it at the replacement.
 - Prefer a small diff. Do not reformat unrelated code.
 
 ## Publishing secrets by mistake

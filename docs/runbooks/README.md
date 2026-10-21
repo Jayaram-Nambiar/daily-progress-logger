@@ -2,7 +2,7 @@
 
 | Document | Use when |
 |---|---|
-| [spaces-roster-and-daily-posts.md](spaces-roster-and-daily-posts.md) | Setting up from scratch, configuring Chat webhooks, Team membership, schedules, OpenRouter weekly summaries, day-to-day ops, and troubleshooting |
+| [spaces-roster-and-daily-posts.md](spaces-roster-and-daily-posts.md) | Setting up from scratch, configuring Chat webhooks, Team membership, schedules, the optional GitHub Issues column, OpenRouter weekly summaries, day-to-day ops, and troubleshooting |
 
 Related:
 

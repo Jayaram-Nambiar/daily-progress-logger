@@ -217,10 +217,16 @@ assert.strictEqual(
 assert.strictEqual(Logic.isFreeOpenRouterModel('meta-llama/llama-3.3-70b-instruct'), false);
 assert.strictEqual(Logic.isFreeOpenRouterModel('deepseek/deepseek-v4-flash:free'), false);
 assert.strictEqual(Logic.isFreeOpenRouterModel('openrouter/free'), true);
-const body = Logic.openRouterChatBody('google/gemma-4-31b-it:free', 'system', 'user');
+const body = Logic.openRouterChatBody(
+  'google/gemma-4-31b-it:free',
+  'system',
+  'user',
+  Logic.weeklySummaryMaxTokens(4)
+);
 assert.strictEqual(body.model, 'google/gemma-4-31b-it:free');
 assert.strictEqual(body.reasoning.effort, 'none');
-  assert.strictEqual(body.max_tokens, 1200);
+assert.strictEqual(body.max_tokens, Logic.weeklySummaryMaxTokens(4));
+assert.ok(body.max_tokens < 1200);
 assert.strictEqual(body.messages[1].content, 'user');
 
 const chatWhitespace = Logic.buildWeeklyChatMessage(
@@ -274,6 +280,14 @@ assert.ok(namedPrompt.indexOf('Ada') >= 0);
 assert.strictEqual(namedPrompt.indexOf('<users/'), -1);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not restate every daily line') >= 0);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not omit a member') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('distinct outcome') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('date order') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Saturday') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Sunday') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('simple past') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('25 words') >= 0);
+assert.strictEqual(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf(';'), -1);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('one bullet') >= 0);
 
 const cleanedSummary = Logic.sanitizeWeeklySummary('• Ada shipped login <users/105>.');
 assert.ok(cleanedSummary.indexOf('Ada shipped login') >= 0);
@@ -423,6 +437,29 @@ assert.strictEqual(itemOnly.rewrite, false);
 const pullPath = Logic.planGithubIssueCell('https://github.com/ArcaAI/project-hope/pull/8', []);
 assert.strictEqual(JSON.stringify(pullPath.issues), '[]');
 
+const spaceSeparated = Logic.planGithubIssueCell(
+  'https://github.com/orgs/ArcaAI/projects/10/views/7?pane=issue&itemId=273314858&issue=ArcaAI%7Csara%7C9 https://github.com/ArcaAI/sara/issues/10',
+  []
+);
+assert.strictEqual(JSON.stringify(spaceSeparated.issues), JSON.stringify([
+  { number: '9', url: 'https://github.com/arcaai/sara/issues/9' },
+  { number: '10', url: 'https://github.com/arcaai/sara/issues/10' }
+]));
+assert.strictEqual(spaceSeparated.display, '9, 10');
+assert.strictEqual(spaceSeparated.rewrite, true);
+assert.strictEqual(JSON.stringify(Logic.githubIssueLinkSpans(spaceSeparated.issues)), JSON.stringify([
+  { start: 0, end: 1, url: 'https://github.com/arcaai/sara/issues/9' },
+  { start: 3, end: 5, url: 'https://github.com/arcaai/sara/issues/10' }
+]));
+assert.strictEqual(JSON.stringify(Logic.githubIssueLinkSpans([
+  { number: '2', url: 'https://github.com/arcaai/sara/issues/2' },
+  { number: '38', url: 'https://github.com/arcaai/sara/issues/38' }
+])), JSON.stringify([
+  { start: 0, end: 1, url: 'https://github.com/arcaai/sara/issues/2' },
+  { start: 3, end: 5, url: 'https://github.com/arcaai/sara/issues/38' }
+]));
+assert.strictEqual(JSON.stringify(Logic.githubIssueLinkSpans([])), '[]');
+
 const mixedDelimiters = Logic.planGithubIssueCell(
   'https://github.com/ArcaAI/project-hope/issues/8; https://github.com/Other/widget/issues/8\nhttps://github.com/ArcaAI/project-hope/issues/9 | https://github.com/ArcaAI/project-hope/issues/9',
   []
@@ -467,5 +504,195 @@ assert.strictEqual(JSON.stringify(Logic.datesInRange('2026-10-05', '2026-10-11')
   '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11'
 ]));
 assert.strictEqual(JSON.stringify(Logic.datesInRange('2026-10-11', '2026-10-05')), '[]');
+
+assert.ok(Logic.weeklySummaryMaxTokens(1) >= 120);
+assert.ok(Logic.weeklySummaryMaxTokens(1) <= 250);
+assert.ok(Logic.weeklySummaryMaxTokens(6) > Logic.weeklySummaryMaxTokens(1));
+assert.ok(Logic.weeklySummaryMaxTokens(6) <= 900);
+assert.ok(Logic.weeklySummaryMaxTokens(20) <= 900);
+
+const priorCap = '• Ada ' + 'worked on a distinct outcome. '.repeat(150);
+assert.ok(priorCap.length > 4000);
+assert.ok(priorCap.length < Logic.MAX_WEEKLY_SUMMARY_CHARS);
+const keptSummary = Logic.sanitizeWeeklySummary(priorCap);
+assert.strictEqual(keptSummary.indexOf('…[truncated]'), -1);
+assert.ok(keptSummary.length > 4000);
+
+const roster = [];
+for (let i = 0; i < 7; i++) {
+  roster.push({
+    member: 'Member ' + i,
+    entries: [{ ymd: '2026-10-12', line: 'shipped item ' + i }]
+  });
+}
+const batches = Logic.planWeeklySummaryBatches(roster);
+assert.ok(batches.length >= 2);
+assert.strictEqual(
+  batches.reduce(function (names, batch) {
+    return names.concat(batch.map(function (block) { return block.member; }));
+  }, []).join('|'),
+  roster.map(function (block) { return block.member; }).join('|')
+);
+batches.forEach(function (batch) {
+  assert.ok(batch.length <= Logic.MAX_MEMBERS_PER_WEEKLY_CALL);
+  const batchPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-10-12', '2026-10-18', batch);
+  assert.ok(batchPrompt.length <= Logic.MAX_WEEKLY_SOURCE_CHARS);
+  assert.strictEqual(batchPrompt.indexOf('…[truncated]'), -1);
+});
+
+const hugeBlock = {
+  member: 'Huge Member',
+  entries: [{ ymd: '2026-10-12', line: 'x'.repeat(Logic.MAX_WEEKLY_SOURCE_CHARS) }]
+};
+const smallBlock = {
+  member: 'Small Member',
+  entries: [{ ymd: '2026-10-13', line: 'shipped the patch' }]
+};
+const sizedBatches = Logic.planWeeklySummaryBatches([hugeBlock, smallBlock]);
+const smallOnly = sizedBatches.find(function (batch) {
+  return batch.some(function (block) { return block.member === 'Small Member'; });
+});
+assert.ok(smallOnly);
+assert.strictEqual(smallOnly.some(function (block) { return block.member === 'Huge Member'; }), false);
+const smallPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-10-12', '2026-10-18', smallOnly);
+assert.ok(smallPrompt.indexOf('shipped the patch') >= 0);
+assert.strictEqual(smallPrompt.indexOf('…[truncated]'), -1);
+const hugePrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-10-12', '2026-10-18', [hugeBlock]);
+assert.strictEqual(hugePrompt.indexOf('…[truncated]'), -1);
+assert.strictEqual(hugePrompt.indexOf('source shortened'), -1);
+assert.ok(hugePrompt.indexOf('x'.repeat(200)) >= 0);
+assert.ok(hugePrompt.length > Logic.MAX_WEEKLY_SOURCE_CHARS);
+
+const cutReply = Logic.readOpenRouterCompletion({
+  choices: [{ finish_reason: 'length', message: { content: '• Ada shipped' } }]
+});
+assert.strictEqual(cutReply.truncated, true);
+assert.strictEqual(cutReply.text, '• Ada shipped');
+const fullReply = Logic.readOpenRouterCompletion({
+  choices: [{ finish_reason: 'stop', message: { content: '• Ada shipped.' } }]
+});
+assert.strictEqual(fullReply.truncated, false);
+
+const splitDecision = Logic.interpretWeeklySummaryAttempt(
+  '• Ada shipped login.\n• Bea tested and then the sentence stops mid',
+  true,
+  [
+    { member: 'Ada', text: 'shipped login' },
+    { member: 'Bea', text: 'tested export' }
+  ]
+);
+assert.strictEqual(splitDecision.action, 'split');
+
+const accepted = Logic.interpretWeeklySummaryAttempt(
+  '• Ada shipped login.\n• Bea tested export.',
+  false,
+  [
+    { member: 'Ada', text: 'shipped login' },
+    { member: 'Bea', text: 'tested export' }
+  ]
+);
+assert.strictEqual(accepted.action, 'accept');
+assert.ok(accepted.text.indexOf('• Bea tested export.') >= 0);
+assert.strictEqual(accepted.text.indexOf('…[truncated]'), -1);
+
+const oneMember = Logic.interpretWeeklySummaryAttempt(
+  '• Ada shipped login. And then the sentence stops mid',
+  true,
+  [{ member: 'Ada', text: 'raw diary' }]
+);
+assert.strictEqual(oneMember.action, 'accept');
+assert.ok(oneMember.text.indexOf('Ada') >= 0);
+assert.ok(oneMember.text.indexOf('shipped login.') >= 0);
+assert.strictEqual(oneMember.text.indexOf('stops mid'), -1);
+assert.strictEqual(oneMember.text.indexOf('raw diary'), -1);
+
+const namedAnyway = Logic.interpretWeeklySummaryAttempt(
+  'Shipped the parser.',
+  false,
+  [{ member: 'Ada Lovelace', text: 'raw diary' }]
+);
+assert.strictEqual(namedAnyway.action, 'accept');
+assert.ok(namedAnyway.text.indexOf('Ada Lovelace') >= 0);
+
+const overCap = '• Ada ' + 'done. '.repeat(500) + '\n• Bea ' + 'done. '.repeat(500);
+assert.ok(overCap.length > Logic.MAX_WEEKLY_SUMMARY_CHARS);
+const overDecision = Logic.interpretWeeklySummaryAttempt(overCap, false, [
+  { member: 'Ada', text: 'done' },
+  { member: 'Bea', text: 'done' }
+]);
+assert.strictEqual(overDecision.action, 'split');
+
+assert.strictEqual(
+  Logic.joinWeeklySummaryBullets(['• Ada shipped.', '', '• Bea tested.']),
+  '• Ada shipped.\n• Bea tested.'
+);
+
+assert.strictEqual(
+  Logic.weeklyStoredSummaryIsUsable('• Ada shipped.\n…[truncated]', [{ member: 'Ada', text: 'x' }]),
+  false
+);
+assert.strictEqual(
+  Logic.weeklyStoredSummaryIsUsable('• Ada shipped.', [
+    { member: 'Ada', text: 'x' },
+    { member: 'Bea', text: 'y' }
+  ]),
+  false
+);
+assert.strictEqual(
+  Logic.weeklyStoredSummaryIsUsable('• Ada shipped.\n• Bea tested.', [
+    { member: 'Ada', text: 'x' },
+    { member: 'Bea', text: 'y' }
+  ]),
+  true
+);
+
+const week = Logic.previousWeekRange('2026-10-21');
+assert.strictEqual(week.weekStartYMD, '2026-10-12');
+assert.strictEqual(week.weekEndYMD, '2026-10-18');
+assert.strictEqual(Logic.ymdInInclusiveRange('2026-10-17', week.weekStartYMD, week.weekEndYMD), true);
+assert.strictEqual(Logic.ymdInInclusiveRange('2026-10-18', week.weekStartYMD, week.weekEndYMD), true);
+assert.strictEqual(Logic.ymdInInclusiveRange('2026-10-11', week.weekStartYMD, week.weekEndYMD), false);
+assert.strictEqual(Logic.ymdInInclusiveRange('2026-10-14', week.weekStartYMD, week.weekEndYMD), true);
+
+const weekendPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-10-12', '2026-10-18', [
+  {
+    member: 'Ada',
+    entries: [
+      { ymd: '2026-10-18', line: 'checked the Sunday logs' },
+      { ymd: '2026-10-16', line: 'shipped the Friday build' },
+      { ymd: '2026-10-17', line: 'fixed the Saturday export' }
+    ]
+  }
+]);
+assert.ok(weekendPrompt.indexOf('[2026-10-16]') < weekendPrompt.indexOf('[2026-10-17]'));
+assert.ok(weekendPrompt.indexOf('[2026-10-17]') < weekendPrompt.indexOf('[2026-10-18]'));
+assert.ok(weekendPrompt.indexOf('Saturday') >= 0);
+assert.ok(weekendPrompt.indexOf('Sunday') >= 0);
+assert.ok(weekendPrompt.indexOf('date order') >= 0);
+
+assert.strictEqual(Logic.dailyPostDays('Mon,Tue,Wed,Thu,Fri'), 'Mon,Tue,Wed,Thu,Fri,Sat,Sun');
+assert.strictEqual(Logic.dailyPostDays('Mon,Wed,Fri'), 'Mon,Wed,Fri');
+assert.strictEqual(Logic.dailyPostDays('Mon,Tue,Wed,Thu,Fri,Sat,Sun'), 'Mon,Tue,Wed,Thu,Fri,Sat,Sun');
+
+const rollupHeader = '*Weekly roll-up — PRJ_VOX — 2026-10-12 → 2026-10-18*';
+const adaBlock = '• Ada\nOn 2026-10-17, Ada fixed the Saturday export.\nOn 2026-10-18, Ada checked the Sunday logs.';
+const beaBlock = '• Bea\nOn 2026-10-12, Bea tested the API.';
+const rollupText = rollupHeader + '\n\n' + adaBlock + '\n' + beaBlock;
+const packLimit = (rollupHeader + '\n\n' + adaBlock).length;
+const packed = Logic.chunkChatByMember(rollupText, packLimit);
+const adaMessages = packed.filter(function (part) {
+  return part.indexOf('• Ada') >= 0 || part.indexOf('Saturday export') >= 0 || part.indexOf('Sunday logs') >= 0;
+});
+assert.strictEqual(adaMessages.length, 1);
+assert.ok(adaMessages[0].indexOf('• Ada') >= 0);
+assert.ok(adaMessages[0].indexOf('Saturday export') >= 0);
+assert.ok(adaMessages[0].indexOf('Sunday logs') >= 0);
+assert.ok(packed.some(function (part) {
+  return part.indexOf('• Bea') >= 0 && part.indexOf('Saturday export') < 0;
+}));
+packed.forEach(function (part) {
+  assert.ok(part.length <= packLimit);
+});
+assert.strictEqual(packed.join('\n').indexOf('…[truncated]'), -1);
 
 console.log('logic.test.js passed');
