@@ -590,10 +590,81 @@ var Logic = {
     }).filter(Boolean).join('\n');
   },
 
+  weeklySummaryLooksLikeDailyPaste_: function (text) {
+    return /^•\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),/m.test(String(text || ''));
+  },
+
+  parseWeeklyEntryLine_: function (line) {
+    var text = String(line || '').trim();
+    var blockers = '';
+    var parts = text.split(/\s+—\s+Blockers:\s*/);
+    if (parts.length > 1) {
+      blockers = parts.slice(1).join(' ').trim();
+      text = parts[0].trim();
+    }
+    text = text.replace(/\s+\([\d.]+h\)\s*$/, '');
+    text = text.replace(/^•\s+[^:]+:\s*/, '');
+    return {
+      summary: text.replace(/\s+/g, ' ').trim(),
+      blockers: blockers.replace(/\s+/g, ' ').trim()
+    };
+  },
+
+  condenseWeeklyEntry_: function (entry, name) {
+    var summary = String((entry && entry.summary) || '').replace(/\s+/g, ' ').trim();
+    var blockers = String((entry && entry.blockers) || '').replace(/\s+/g, ' ').trim();
+    if (!summary) {
+      var parsed = Logic.parseWeeklyEntryLine_(entry && entry.line);
+      summary = parsed.summary;
+      if (!blockers) blockers = parsed.blockers;
+    }
+    if (!summary && !blockers) return '';
+    var ymd = String((entry && entry.ymd) || '').trim();
+    var lines = [];
+    if (summary) {
+      var body = summary.replace(/\.+$/, '');
+      if (/^[A-Z][a-z]/.test(body)) body = body.charAt(0).toLowerCase() + body.slice(1);
+      var sentence = name + ' ' + body + '.';
+      if (ymd) sentence = 'On ' + ymd + ', ' + sentence;
+      lines.push(sentence);
+    }
+    if (blockers) lines.push('Blocker: ' + blockers.replace(/\.+$/, '') + '.');
+    return lines.join('\n');
+  },
+
+  condenseWeeklyMember_: function (block) {
+    var name = Logic.weeklyPromptHeading_(block);
+    var entries = ((block && block.entries) || []).slice().sort(function (a, b) {
+      return String((a && a.ymd) || '').localeCompare(String((b && b.ymd) || ''));
+    });
+    var parts = [];
+    if (entries.length) {
+      entries.forEach(function (entry) {
+        var sentence = Logic.condenseWeeklyEntry_(entry, name);
+        if (sentence) parts.push(sentence);
+      });
+    } else {
+      String((block && block.text) || '').split('\n').forEach(function (line) {
+        if (!String(line || '').trim()) return;
+        var sentence = Logic.condenseWeeklyEntry_({ line: line }, name);
+        if (sentence) parts.push(sentence);
+      });
+    }
+    if (!parts.length) return '';
+    return '• ' + name + '\n' + parts.join('\n');
+  },
+
+  condenseWeeklySpace_: function (memberBlocks) {
+    return (memberBlocks || []).map(function (block) {
+      return Logic.condenseWeeklyMember_(block);
+    }).filter(Boolean).join('\n');
+  },
+
   weeklyStoredSummaryIsUsable: function (summary, memberBlocks) {
     var raw = String(summary || '');
     if (!raw.trim()) return false;
     if (raw.indexOf('…[truncated]') >= 0) return false;
+    if (Logic.weeklySummaryLooksLikeDailyPaste_(raw)) return false;
     return Logic.membersOmittedFromSummary_(raw, memberBlocks).length === 0;
   },
 
@@ -618,21 +689,22 @@ var Logic = {
       ''
     ];
     var summary = Logic.sanitizeWeeklySummary(aiSummary);
-    if (summary) {
+    if (summary && !Logic.weeklySummaryLooksLikeDailyPaste_(summary)) {
       lines.push(summary);
       Logic.membersOmittedFromSummary_(summary, memberBlocks).forEach(function (block) {
+        var condensed = Logic.condenseWeeklyMember_(block);
+        if (!condensed) return;
         lines.push('');
-        lines.push(Logic.weeklyPromptHeading_(block));
-        lines.push(Logic.stripChatMentions_(String((block && block.text) || '')));
+        lines.push(condensed);
       });
       lines.push('');
       return lines.join('\n');
     }
-    (memberBlocks || []).forEach(function (block) {
-      lines.push(String((block && block.label) || (block && block.member) || 'Member'));
-      lines.push(String((block && block.text) || ''));
+    var condensedAll = Logic.condenseWeeklySpace_(memberBlocks);
+    if (condensedAll) {
+      lines.push(condensedAll);
       lines.push('');
-    });
+    }
     return lines.join('\n');
   },
 

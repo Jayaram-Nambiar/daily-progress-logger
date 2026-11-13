@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The Daily Progress Logger script is container-bound to spreadsheet `1NHSu_IvUWXnNJqyEbqnAydQ4joftWk6DP68RPQRgMX4`. It posts to Slack on a time trigger, sends reminder email, and reads the active spreadsheet. Those calls run as the user who authorized the script.
+The Daily Progress Logger script is container-bound to spreadsheet `1NHSu_IvUWXnNJqyEbqnAydQ4joftWk6DP68RPQRgMX4`. It posts to Slack on a time trigger, reads the active spreadsheet, and does not send reminder email. Those calls run as the user who authorized the script.
 
 Google issues a refresh token that expires in 7 days when a Cloud project has an OAuth consent screen set to an external user type and a publishing status of Testing, unless the only scopes are name, email, and profile. A standard Cloud project in Testing hits that limit. The script then stops until someone re-authorizes it.
 

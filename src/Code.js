@@ -19,8 +19,10 @@
  * webhook space when OPENROUTER_API_KEY is set. Each member with updates
  * gets one short bullet. A long week is split across calls so the reply
  * is not cut off. A stored summary that was cut off is generated again.
- * A member still missing is appended. If every model fails, the post is
- * that space's member text. Default models:
+ * A member still missing is summarized from that member's rows.
+ * If every model fails, or the stored text is still the daily lines,
+ * each logged outcome becomes one short sentence. The daily lines are not posted.
+ * Default models:
  * google/gemma-4-31b-it:free then google/gemma-4-26b-a4b-it:free, then openrouter/free.
  * The script never calls the Google Chat API and stays on the default GCP project.
  * Webhook URLs and API keys are Script Properties, not source.
@@ -161,7 +163,7 @@ function addOrUpdateMember() {
 
   const emailResp = ui.prompt(
     'Email',
-    'Optional. @arcaai.com address. Used for the reminder email and to fill the Chat mention when that address is in the roster map. Cancel aborts.',
+    'Optional. @arcaai.com address. Used to fill the Chat mention when that address is in the roster map. Cancel aborts.',
     ui.ButtonSet.OK_CANCEL
   );
   if (emailResp.getSelectedButton() !== ui.Button.OK) return;
@@ -1355,7 +1357,6 @@ function sendReminder_(opts) {
   const members = readTeamRows_(team);
   const spaces = readConfiguredSpaces_(ss);
   const missingBySpace = {};
-  const missingByMember = {};
 
   members.forEach(member => {
     const checks = matrix[member.name] || {};
@@ -1370,8 +1371,6 @@ function sendReminder_(opts) {
       if (Logic.hasUpdateForSpace(rows, todayStr, space.name)) return;
       if (!missingBySpace[space.name]) missingBySpace[space.name] = { webhook: space.webhook, labels: [] };
       missingBySpace[space.name].labels.push(chatLabel_(member));
-      if (!missingByMember[member.name]) missingByMember[member.name] = { name: member.name, email: member.email, spaces: [] };
-      missingByMember[member.name].spaces.push(space.name);
     });
   });
 
@@ -1390,20 +1389,6 @@ function sendReminder_(opts) {
     }
   });
   noteWebhookFailures_('Reminder', failures);
-
-  Object.keys(missingByMember).forEach(name => {
-    const person = missingByMember[name];
-    if (!person.email) return;
-    try {
-      MailApp.sendEmail({
-        to: person.email,
-        subject: 'Reminder: Update daily progress — ' + todayStr,
-        htmlBody: Logic.reminderEmailHtml(person.name, person.spaces, sheetUrl, dailyPostTime)
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  });
 
   if (!silent) {
     SpreadsheetApp.getUi().alert(posted.length
@@ -1467,7 +1452,12 @@ function weeklyCollatePreviousWeek_(opts) {
       const hoursText = item.hours ? String(round1_(item.hours)) : '';
       const line = Logic.formatWeeklyEntryLine(prettyDate, item.summary, hoursText, item.blockers);
       if (!buckets[item.space]) buckets[item.space] = [];
-      buckets[item.space].push({ ymd: rowYMD, line: line });
+      buckets[item.space].push({
+        ymd: rowYMD,
+        line: line,
+        summary: item.summary,
+        blockers: item.blockers
+      });
     });
     Object.keys(buckets).forEach(spaceName => {
       const entries = buckets[spaceName].slice().sort((a, b) =>
@@ -1698,7 +1688,7 @@ function setOpenRouterApiKey() {
   }
   ui.alert(
     'Saved OPENROUTER_API_KEY and free-tier models (' + DEFAULT_OPENROUTER_MODELS +
-      '). Monday weekly posts send one short bullet per member. A cut-off summary is generated again. A member still missing is appended. If every model fails, the post is that space\'s member text.'
+      '). Monday weekly posts send one short bullet per member. A cut-off summary is generated again. A member still missing is summarized from that member\'s rows. If every model fails, each logged outcome is one short sentence.'
   );
 }
 
@@ -1716,7 +1706,7 @@ function openRouterModelList_() {
 
 /**
  * Returns one short bullet per member, or '' when every call fails
- * (the caller then posts that space's member text).
+ * (the caller then posts one short sentence per logged outcome).
  * Skips the API when the space has no previous-week member content.
  * A reply that stops early is not posted; that group is summarized again in smaller calls.
  */
@@ -1864,7 +1854,7 @@ function ensureTeamSheet_() {
   });
   team.getRange(1, 1).setNote('Member full name. Becomes the personal tab name.');
   team.getRange(1, 2).setNote('Slack id. Unused while Slack is disabled.');
-  team.getRange(1, 3).setNote('Optional. Reminder email.');
+  team.getRange(1, 3).setNote('Optional. @arcaai.com address used to fill the Chat mention. Reminders are not emailed.');
   team.getRange(1, 4).setNote('Google Chat mention: <users/USER_ID> or a numeric user id. Blank posts the name without a ping.');
   if (String(have[4] || '').trim() !== 'Spaces') team.getRange(1, 5).setValue('Spaces').setFontWeight('bold');
   team.getRange(1, 5).setNote(

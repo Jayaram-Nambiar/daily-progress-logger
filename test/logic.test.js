@@ -171,7 +171,9 @@ const chatNoAi = Logic.buildWeeklyChatMessage(
   '',
   [{ label: '*Ada*', text: '• Mon: shipped login' }]
 );
-assert.ok(chatNoAi.indexOf('*Ada*') >= 0);
+assert.ok(chatNoAi.indexOf('• Ada') >= 0);
+assert.ok(chatNoAi.indexOf('*Ada*') < 0);
+assert.ok(chatNoAi.indexOf('• Mon:') < 0);
 assert.ok(chatNoAi.indexOf('shipped login') >= 0);
 assert.strictEqual(
   Logic.parseOpenRouterModels(
@@ -236,7 +238,8 @@ const chatWhitespace = Logic.buildWeeklyChatMessage(
   '   ',
   [{ label: '*Ada*', text: '• Mon: shipped login' }]
 );
-assert.ok(chatWhitespace.indexOf('*Ada*') >= 0);
+assert.ok(chatWhitespace.indexOf('• Ada') >= 0);
+assert.ok(chatWhitespace.indexOf('*Ada*') < 0);
 assert.ok(chatWhitespace.indexOf('shipped login') >= 0);
 const chatNull = Logic.buildWeeklyChatMessage(
   'PRJ_VOX',
@@ -245,7 +248,8 @@ const chatNull = Logic.buildWeeklyChatMessage(
   null,
   [{ label: '*Bea*', text: '• Tue: fixed export' }]
 );
-assert.ok(chatNull.indexOf('*Bea*') >= 0);
+assert.ok(chatNull.indexOf('• Bea') >= 0);
+assert.ok(chatNull.indexOf('*Bea*') < 0);
 assert.ok(chatNull.indexOf('fixed export') >= 0);
 assert.strictEqual(
   Logic.extractOpenRouterText({ choices: [{ message: { content: '', reasoning: '• hidden' } }] }),
@@ -694,5 +698,77 @@ packed.forEach(function (part) {
   assert.ok(part.length <= packLimit);
 });
 assert.strictEqual(packed.join('\n').indexOf('…[truncated]'), -1);
+
+const voxBlocks = [
+  {
+    member: 'Neena A Panicker',
+    label: '<users/1>',
+    entries: [
+      {
+        ymd: '2026-11-04',
+        summary: 'Did DSP and mic configuration in 3 departments',
+        blockers: '',
+        line: '• Wed, Nov 4: Did DSP and mic configuration in 3 departments (4h)'
+      },
+      {
+        ymd: '2026-11-05',
+        summary: 'Sanity Test after New Deployment',
+        blockers: 'Network error Error blocked me from continuing validation.',
+        line: '• Thu, Nov 5: Sanity Test after New Deployment (1.5h) — Blockers: Network error Error blocked me from continuing validation.'
+      }
+    ]
+  },
+  {
+    member: 'Dr. Jayaram Nambiar',
+    label: '<users/2>',
+    entries: [
+      {
+        ymd: '2026-11-04',
+        summary: 'Generated 18 mock consult codemixed transcripts',
+        line: '• Wed, Nov 4: Generated 18 mock consult codemixed transcripts (2h)'
+      },
+      {
+        ymd: '2026-11-05',
+        summary: 'Updated pre-summary and pre-consult summary prompts. Then, discarded that and made shibus rendition of the same clear guardrails',
+        line: '• Thu, Nov 5: Updated pre-summary and pre-consult summary prompts. Then, discarded that and made shibus rendition of the same clear guardrails (1h)'
+      }
+    ]
+  }
+];
+voxBlocks.forEach(function (block) {
+  block.text = block.entries.map(function (entry) { return entry.line; }).join('\n');
+});
+const pastedRollup = Logic.buildWeeklyChatMessage('PRJ_VOX', '2026-11-02', '2026-11-08', '', voxBlocks);
+assert.strictEqual(pastedRollup.indexOf('(4h)'), -1);
+assert.strictEqual(pastedRollup.indexOf('• Wed, Nov 4:'), -1);
+assert.strictEqual(pastedRollup.indexOf('<users/'), -1);
+assert.ok(pastedRollup.indexOf('• Neena A Panicker') >= 0);
+assert.ok(pastedRollup.indexOf('DSP and mic configuration') >= 0);
+assert.ok(pastedRollup.indexOf('Blocker: Network error Error blocked me from continuing validation.') >= 0);
+assert.ok(pastedRollup.indexOf('• Dr. Jayaram Nambiar') >= 0);
+assert.ok(pastedRollup.indexOf('shibus rendition') >= 0);
+assert.ok(pastedRollup.indexOf('On 2026-11-04') < pastedRollup.indexOf('On 2026-11-05'));
+const jayChunks = Logic.chunkChatByMember(pastedRollup, 3500).filter(function (part) {
+  return part.indexOf('Dr. Jayaram Nambiar') >= 0 || part.indexOf('shibus rendition') >= 0;
+});
+assert.strictEqual(jayChunks.length, 1);
+assert.ok(jayChunks[0].indexOf('mock consult codemixed transcripts') >= 0);
+assert.ok(jayChunks[0].indexOf('shibus rendition') >= 0);
+
+const storedPaste = 'Neena A Panicker\n• Wed, Nov 4: Did DSP and mic configuration in 3 departments (4h)';
+assert.strictEqual(
+  Logic.weeklyStoredSummaryIsUsable(storedPaste, [{ member: 'Neena A Panicker', text: 'x' }]),
+  false
+);
+const fromStoredPaste = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-11-02',
+  '2026-11-08',
+  storedPaste,
+  [voxBlocks[0]]
+);
+assert.strictEqual(fromStoredPaste.indexOf('• Wed, Nov 4:'), -1);
+assert.strictEqual(fromStoredPaste.indexOf('(4h)'), -1);
+assert.ok(fromStoredPaste.indexOf('DSP and mic configuration') >= 0);
 
 console.log('logic.test.js passed');
