@@ -17,11 +17,13 @@
  * Menu "Apply Team spaces to reminder matrix" applies column E to the matrix.
  * Monday weekly posts may send an OpenRouter summary per configured
  * webhook space when OPENROUTER_API_KEY is set. Each member with updates
- * gets one short bullet. A long week is split across calls so the reply
- * is not cut off. A stored summary that was cut off is generated again.
+ * gets short bullets in chronological order. A long week is split across
+ * calls so the reply is not cut off. A stored summary that was cut off,
+ * or that repeats each log as "On <date>, <name>", is generated again.
  * A member still missing is summarized from that member's rows.
  * If every model fails, or the stored text is still the daily lines,
- * each logged outcome becomes one short sentence. The daily lines are not posted.
+ * each member becomes a name line plus one bullet per logged item.
+ * The daily lines are not posted. A rejected reply tries the next model.
  * Default models:
  * google/gemma-4-31b-it:free then google/gemma-4-26b-a4b-it:free, then openrouter/free.
  * The script never calls the Google Chat API and stays on the default GCP project.
@@ -1688,7 +1690,7 @@ function setOpenRouterApiKey() {
   }
   ui.alert(
     'Saved OPENROUTER_API_KEY and free-tier models (' + DEFAULT_OPENROUTER_MODELS +
-      '). Monday weekly posts send one short bullet per member. A cut-off summary is generated again. A member still missing is summarized from that member\'s rows. If every model fails, each logged outcome is one short sentence.'
+      '). Monday weekly posts send short bullets per member. A cut-off or line-by-line diary is generated again. A member still missing is summarized from that member\'s rows. If one model fails, the next model is tried. If every model fails, each member is a name line plus one bullet per logged item.'
   );
 }
 
@@ -1705,8 +1707,8 @@ function openRouterModelList_() {
 }
 
 /**
- * Returns one short bullet per member, or '' when every call fails
- * (the caller then posts one short sentence per logged outcome).
+ * Returns short bullets per member, or '' when every model fails
+ * (the caller then posts one bullet per logged item).
  * Skips the API when the space has no previous-week member content.
  * A reply that stops early is not posted; that group is summarized again in smaller calls.
  */
@@ -1749,8 +1751,15 @@ function summarizeWeeklyBatch_(spaceName, weekStartYMD, weekEndYMD, blocks, mode
       if (attempt) console.error('OpenRouter empty content model=' + models[i] + ' space=' + spaceName);
       continue;
     }
-    const decision = Logic.interpretWeeklySummaryAttempt(attempt.text, attempt.truncated, blocks);
-    if (decision.action === 'accept' && decision.text) return decision.text;
+    const choice = Logic.selectWeeklyFallbackReply(
+      [{ model: models[i], text: attempt.text, truncated: attempt.truncated }],
+      blocks
+    );
+    if (choice.status === 'accepted') return choice.text;
+    if (choice.status !== 'split') {
+      console.error('Weekly summary rejected model=' + models[i] + ' space=' + spaceName);
+      continue;
+    }
     if (blocks.length <= 1) continue;
     console.log(
       'Weekly summary for ' + spaceName + ' was cut off at ' + blocks.length +

@@ -226,26 +226,32 @@ var Logic = {
     'You write a weekly progress summary for one Google Chat space. ' +
     'Use only the provided text. Do not invent work, people, dates, hours, or blockers. ' +
     'Each update is tagged [YYYY-MM-DD]. The heading is the member name. ' +
-    'Include every logged date. Include Saturday, Sunday, and holidays when the source has them. ' +
-    'Do not skip a date. ' +
-    'Write one bullet for each member. Do not omit a member. ' +
-    'Start the bullet with "• " and the exact member name. ' +
-    'On the following lines, write the outcomes in date order. The earliest date comes first. ' +
-    'Write one short sentence for each distinct outcome. ' +
-    'Use the simple past. Use the active voice. Make the member the subject of each sentence. ' +
-    'Use 25 words or fewer in each sentence. ' +
-    'Do not restate every daily line. Do not copy the source. ' +
-    'Add one blocker sentence when the source states a blocker. ' +
+    'Use those tags only to keep chronological order. ' +
+    'Include Saturday, Sunday, and holidays when the source has them. ' +
+    'Write one section for each member. Do not omit a member. ' +
+    'The first line of a section is "• " plus the exact member name. ' +
+    'Under it, write two to five bullets. Summarize the member\'s week in those bullets. ' +
+    'Start each bullet with "- ". ' +
+    'Combine related work into one bullet. Do not write one bullet per log line. ' +
+    'Do not copy the source line by line. ' +
+    'The earliest work comes first. ' +
+    'Do not mention calendar dates. Do not start a line with On followed by a date. ' +
+    'Write the member name only on the • line. ' +
+    'Use the simple past. Use the active voice. ' +
+    'Do not include links or attachments. ' +
+    'Add a bullet that starts with "- Blocker: " when the source states a blocker. ' +
     'Do not use a semicolon. ' +
     'Never output a <users/...> token or a numeric user id. ' +
     'Output plain text only. No markdown headings.\n' +
-    'Example input: Ada / [2026-10-16] shipped login / [2026-10-17] fixed export / [2026-10-18] checked logs. Blockers: staging.\n' +
+    'Example input: Ada / [2026-10-16] shipped login / [2026-10-17] fixed export https://example.com/notes / [2026-10-18] checked logs. Blockers: staging.\n' +
     'Example output:\n' +
     '• Ada\n' +
-    'On 2026-10-16, Ada shipped the login.\n' +
-    'On 2026-10-17, Ada fixed the export.\n' +
-    'On 2026-10-18, Ada checked the logs.\n' +
-    'Blocker: staging is down.',
+    '- Shipped the login, then fixed the export and checked the logs.\n' +
+    '- Blocker: staging is down.\n' +
+    'Rejected shape:\n' +
+    '• Ada\n' +
+    'On 2026-03-02, Ada shipped the login.\n' +
+    'On 2026-03-03, Ada fixed the export.',
 
   truncateText: function (text, maxChars) {
     var raw = String(text || '');
@@ -297,7 +303,9 @@ var Logic = {
       });
       return sorted.map(function (entry) {
         var ymd = String((entry && entry.ymd) || '').trim();
-        var line = Logic.stripChatMentions_(String((entry && entry.line) || '')).trim();
+        var line = Logic.stripWeeklyLinks_(
+          Logic.stripChatMentions_(String((entry && entry.line) || ''))
+        ).trim();
         if (!line) return '';
         return ymd ? ('[' + ymd + '] ' + line) : line;
       }).filter(Boolean).join('\n');
@@ -312,8 +320,8 @@ var Logic = {
       '',
       'Member updates. Each line is tagged [YYYY-MM-DD]. ' +
         'The heading is the member name. The lines are in date order. ' +
-        'Keep that order. Include Saturday, Sunday, and holidays when they are present. ' +
-        'Write one short section per member for the whole week:',
+        'Include Saturday, Sunday, and holidays when they are present. ' +
+        'Write a bulleted summary for each member. Combine related points in chronological order. Do not mention calendar dates. Leave out links and attachments.',
       ''
     ];
     (memberBlocks || []).forEach(function (block) {
@@ -485,7 +493,7 @@ var Logic = {
   },
 
   /**
-   * Tokens for one short bullet per member in this call, with slack so the last bullet can finish.
+   * Tokens for a short bullet list per member, with slack so the last bullet can finish.
    */
   weeklySummaryMaxTokens: function (memberCount) {
     var n = Number(memberCount);
@@ -572,6 +580,7 @@ var Logic = {
     var missing = Logic.membersOmittedFromSummary_(fitted.text, blocks);
     var cutOff = fitted.cut || (!!finishTruncated && !Logic.weeklySummaryEndsClean_(fitted.text));
     if (!fitted.text) return { action: single ? 'accept' : 'split', text: '' };
+    if (Logic.weeklySummaryIsDiaryEcho_(fitted.text)) return { action: 'reject', text: '' };
     if (!cutOff && !missing.length) {
       return { action: 'accept', text: Logic.ensureSingleMemberName_(fitted.text, blocks) };
     }
@@ -584,6 +593,30 @@ var Logic = {
     return { action: 'split', text: '' };
   },
 
+  selectWeeklyFallbackReply: function (attempts, memberBlocks) {
+    var list = attempts || [];
+    for (var i = 0; i < list.length; i++) {
+      var attempt = list[i] || {};
+      if (!String(attempt.text || '').trim()) continue;
+      var decision = Logic.interpretWeeklySummaryAttempt(
+        attempt.text,
+        !!attempt.truncated,
+        memberBlocks
+      );
+      if (decision.action === 'accept' && decision.text) {
+        return {
+          status: 'accepted',
+          model: String(attempt.model || ''),
+          text: decision.text
+        };
+      }
+      if (decision.action === 'split') {
+        return { status: 'split', model: String(attempt.model || ''), text: '' };
+      }
+    }
+    return { status: 'exhausted', model: '', text: '' };
+  },
+
   joinWeeklySummaryBullets: function (parts) {
     return (parts || []).map(function (part) {
       return String(part || '').trim();
@@ -592,6 +625,26 @@ var Logic = {
 
   weeklySummaryLooksLikeDailyPaste_: function (text) {
     return /^•\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),/m.test(String(text || ''));
+  },
+
+  weeklyBodyRepeatsName_: function (body, name) {
+    var escaped = String(name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (!escaped) return false;
+    return new RegExp('(^|[^A-Za-z0-9])' + escaped + '([^A-Za-z0-9]|$)', 'i').test(body);
+  },
+
+  weeklySummaryIsDiaryEcho_: function (text) {
+    var raw = String(text || '');
+    if (/^On \d{4}-\d{2}-\d{2}\b/m.test(raw)) return true;
+    var sections = raw.split(/\n(?=• )/);
+    for (var i = 0; i < sections.length; i++) {
+      var lines = sections[i].split('\n');
+      if (!/^•\s+/.test(lines[0] || '')) continue;
+      var heading = String(lines[0] || '').replace(/^•\s+/, '').trim();
+      var body = lines.slice(1).join('\n');
+      if (heading && body.trim() && Logic.weeklyBodyRepeatsName_(body, heading)) return true;
+    }
+    return false;
   },
 
   parseWeeklyEntryLine_: function (line) {
@@ -610,7 +663,15 @@ var Logic = {
     };
   },
 
-  condenseWeeklyEntry_: function (entry, name) {
+  stripWeeklyLinks_: function (text) {
+    return String(text || '')
+      .replace(/https?:\/\/\S+/gi, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\s+([.,])/g, '$1')
+      .trim();
+  },
+
+  weeklyEntryParts_: function (entry) {
     var summary = String((entry && entry.summary) || '').replace(/\s+/g, ' ').trim();
     var blockers = String((entry && entry.blockers) || '').replace(/\s+/g, ' ').trim();
     if (!summary) {
@@ -618,18 +679,17 @@ var Logic = {
       summary = parsed.summary;
       if (!blockers) blockers = parsed.blockers;
     }
-    if (!summary && !blockers) return '';
-    var ymd = String((entry && entry.ymd) || '').trim();
-    var lines = [];
-    if (summary) {
-      var body = summary.replace(/\.+$/, '');
-      if (/^[A-Z][a-z]/.test(body)) body = body.charAt(0).toLowerCase() + body.slice(1);
-      var sentence = name + ' ' + body + '.';
-      if (ymd) sentence = 'On ' + ymd + ', ' + sentence;
-      lines.push(sentence);
-    }
-    if (blockers) lines.push('Blocker: ' + blockers.replace(/\.+$/, '') + '.');
-    return lines.join('\n');
+    return {
+      ymd: String((entry && entry.ymd) || '').trim(),
+      summary: Logic.stripWeeklyLinks_(summary).replace(/\.+$/, '').trim(),
+      blockers: Logic.stripWeeklyLinks_(blockers).replace(/\.+$/, '').trim()
+    };
+  },
+
+  lowerFirstWeekly_: function (text) {
+    var body = String(text || '').trim();
+    if (/^[A-Z][a-z]/.test(body)) return body.charAt(0).toLowerCase() + body.slice(1);
+    return body;
   },
 
   condenseWeeklyMember_: function (block) {
@@ -640,18 +700,33 @@ var Logic = {
     var parts = [];
     if (entries.length) {
       entries.forEach(function (entry) {
-        var sentence = Logic.condenseWeeklyEntry_(entry, name);
-        if (sentence) parts.push(sentence);
+        parts.push(Logic.weeklyEntryParts_(entry));
       });
     } else {
       String((block && block.text) || '').split('\n').forEach(function (line) {
         if (!String(line || '').trim()) return;
-        var sentence = Logic.condenseWeeklyEntry_({ line: line }, name);
-        if (sentence) parts.push(sentence);
+        parts.push(Logic.weeklyEntryParts_({ line: line }));
       });
     }
-    if (!parts.length) return '';
-    return '• ' + name + '\n' + parts.join('\n');
+    var bullets = [];
+    var blockers = [];
+    parts.forEach(function (part) {
+      if (part.blockers) blockers.push(part.blockers);
+      var sentence = Logic.weeklyBulletSentence_(part.summary);
+      if (sentence) bullets.push('- ' + sentence);
+    });
+    blockers.forEach(function (blocker) {
+      var sentence = Logic.weeklyBulletSentence_(blocker);
+      if (sentence) bullets.push('- Blocker: ' + sentence);
+    });
+    if (!bullets.length) return '';
+    return '• ' + name + '\n' + bullets.join('\n');
+  },
+
+  weeklyBulletSentence_: function (text) {
+    var body = Logic.lowerFirstWeekly_(String(text || '').replace(/\s+/g, ' ').trim().replace(/\.+$/, ''));
+    if (!body) return '';
+    return body.charAt(0).toUpperCase() + body.slice(1) + '.';
   },
 
   condenseWeeklySpace_: function (memberBlocks) {
@@ -665,6 +740,7 @@ var Logic = {
     if (!raw.trim()) return false;
     if (raw.indexOf('…[truncated]') >= 0) return false;
     if (Logic.weeklySummaryLooksLikeDailyPaste_(raw)) return false;
+    if (Logic.weeklySummaryIsDiaryEcho_(raw)) return false;
     return Logic.membersOmittedFromSummary_(raw, memberBlocks).length === 0;
   },
 
@@ -689,7 +765,11 @@ var Logic = {
       ''
     ];
     var summary = Logic.sanitizeWeeklySummary(aiSummary);
-    if (summary && !Logic.weeklySummaryLooksLikeDailyPaste_(summary)) {
+    if (
+      summary &&
+      !Logic.weeklySummaryLooksLikeDailyPaste_(summary) &&
+      !Logic.weeklySummaryIsDiaryEcho_(summary)
+    ) {
       lines.push(summary);
       Logic.membersOmittedFromSummary_(summary, memberBlocks).forEach(function (block) {
         var condensed = Logic.condenseWeeklyMember_(block);
@@ -779,7 +859,7 @@ var Logic = {
   },
 
   /**
-   * Summaries are one short bullet per member. effort "none" keeps the reply
+   * Summaries are short bullets per member. effort "none" keeps the reply
    * in message.content instead of spending max_tokens on reasoning.
    * maxTokens is the budget for this batch, from weeklySummaryMaxTokens.
    */

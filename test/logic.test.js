@@ -174,7 +174,7 @@ const chatNoAi = Logic.buildWeeklyChatMessage(
 assert.ok(chatNoAi.indexOf('• Ada') >= 0);
 assert.ok(chatNoAi.indexOf('*Ada*') < 0);
 assert.ok(chatNoAi.indexOf('• Mon:') < 0);
-assert.ok(chatNoAi.indexOf('shipped login') >= 0);
+assert.ok(/shipped login/i.test(chatNoAi));
 assert.strictEqual(
   Logic.parseOpenRouterModels(
     'meta-llama/llama-3.3-70b-instruct:free, deepseek/deepseek-v4-flash:free, meta-llama/llama-3.3-70b-instruct:free',
@@ -240,7 +240,7 @@ const chatWhitespace = Logic.buildWeeklyChatMessage(
 );
 assert.ok(chatWhitespace.indexOf('• Ada') >= 0);
 assert.ok(chatWhitespace.indexOf('*Ada*') < 0);
-assert.ok(chatWhitespace.indexOf('shipped login') >= 0);
+assert.ok(/shipped login/i.test(chatWhitespace));
 const chatNull = Logic.buildWeeklyChatMessage(
   'PRJ_VOX',
   '2026-09-14',
@@ -250,7 +250,7 @@ const chatNull = Logic.buildWeeklyChatMessage(
 );
 assert.ok(chatNull.indexOf('• Bea') >= 0);
 assert.ok(chatNull.indexOf('*Bea*') < 0);
-assert.ok(chatNull.indexOf('fixed export') >= 0);
+assert.ok(/fixed export/i.test(chatNull));
 assert.strictEqual(
   Logic.extractOpenRouterText({ choices: [{ message: { content: '', reasoning: '• hidden' } }] }),
   ''
@@ -282,14 +282,19 @@ const namedPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-09-28', 
 ]);
 assert.ok(namedPrompt.indexOf('Ada') >= 0);
 assert.strictEqual(namedPrompt.indexOf('<users/'), -1);
-assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not restate every daily line') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not copy the source line by line') >= 0);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not omit a member') >= 0);
-assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('distinct outcome') >= 0);
-assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('date order') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('two to five bullets') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Summarize the member\'s week') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('chronological order') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not mention calendar dates') >= 0);
+assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Do not include links') >= 0);
+assert.strictEqual(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('On 2026-10-16'), -1);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Saturday') >= 0);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('Sunday') >= 0);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('simple past') >= 0);
-assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('25 words') >= 0);
+assert.strictEqual(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('distinct outcome'), -1);
+assert.strictEqual(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('25 words'), -1);
 assert.strictEqual(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf(';'), -1);
 assert.ok(Logic.WEEKLY_SUMMARY_SYSTEM.indexOf('one bullet') >= 0);
 
@@ -330,7 +335,7 @@ const restoredMember = Logic.buildWeeklyChatMessage(
 assert.ok(restoredMember.indexOf('Rijna Shameen') >= 0);
 assert.ok(restoredMember.indexOf('• Mon: docs') < 0);
 assert.ok(restoredMember.indexOf('Konduka Sanjali') >= 0);
-assert.ok(restoredMember.indexOf('tested transcription') >= 0);
+assert.ok(/tested transcription/i.test(restoredMember));
 
 assert.strictEqual(Logic.isFreeOpenRouterModel('qwen/qwen3.8-27b:free'), false);
 assert.strictEqual(
@@ -747,7 +752,50 @@ assert.ok(pastedRollup.indexOf('DSP and mic configuration') >= 0);
 assert.ok(pastedRollup.indexOf('Blocker: Network error Error blocked me from continuing validation.') >= 0);
 assert.ok(pastedRollup.indexOf('• Dr. Jayaram Nambiar') >= 0);
 assert.ok(pastedRollup.indexOf('shibus rendition') >= 0);
-assert.ok(pastedRollup.indexOf('On 2026-11-04') < pastedRollup.indexOf('On 2026-11-05'));
+assert.strictEqual(pastedRollup.indexOf('On 2026-11-04'), -1);
+assert.ok(pastedRollup.indexOf('DSP and mic configuration') < pastedRollup.indexOf('Sanity Test'));
+assert.ok(pastedRollup.indexOf('mock consult codemixed transcripts') < pastedRollup.indexOf('shibus rendition'));
+const neenaSection = pastedRollup.slice(
+  pastedRollup.indexOf('• Neena A Panicker'),
+  pastedRollup.indexOf('• Dr. Jayaram Nambiar')
+).trim();
+assert.ok(neenaSection.indexOf('\n- ') >= 0);
+assert.ok(neenaSection.split('\n').length >= 3);
+assert.strictEqual(neenaSection.indexOf('2026-11-'), -1);
+assert.strictEqual((neenaSection.match(/Neena A Panicker/g) || []).length, 1);
+const sameDay = Logic.condenseWeeklyMember_({
+  member: 'Sumankumar Singh',
+  entries: [
+    { ymd: '2026-11-10', summary: 'Studied Guard concepts and the CanActivate interface' },
+    { ymd: '2026-11-10', summary: 'Studied Exception Filters and Pipes' },
+    { ymd: '2026-11-11', summary: 'Audited the API Gateway request-handling architecture' }
+  ]
+});
+assert.ok(sameDay.indexOf('\n- ') >= 0);
+assert.strictEqual(sameDay.split('\n').length, 4);
+assert.strictEqual(sameDay.indexOf('2026-11-'), -1);
+assert.ok(sameDay.indexOf('CanActivate') < sameDay.indexOf('Exception Filters'));
+assert.ok(sameDay.indexOf('Exception Filters') < sameDay.indexOf('API Gateway'));
+assert.strictEqual((sameDay.match(/Sumankumar Singh/g) || []).length, 1);
+const linked = Logic.condenseWeeklyMember_({
+  member: 'Neena A Panicker',
+  entries: [{
+    ymd: '2026-11-12',
+    summary: 'Generated summaries for 12 audios https://docs.google.com/document/d/abc/edit?usp=sharing'
+  }]
+});
+assert.strictEqual(linked.indexOf('http'), -1);
+assert.ok(linked.indexOf('12 audios') >= 0);
+const linkedPrompt = Logic.buildWeeklySummaryUserPrompt('PRJ_VOX', '2026-11-09', '2026-11-15', [{
+  member: 'Neena A Panicker',
+  entries: [{
+    ymd: '2026-11-12',
+    line: 'Generated summaries for 12 audios https://docs.google.com/document/d/abc/edit'
+  }]
+}]);
+assert.strictEqual(linkedPrompt.indexOf('http'), -1);
+assert.ok(linkedPrompt.indexOf('12 audios') >= 0);
+assert.ok(linkedPrompt.indexOf('bulleted summary') >= 0);
 const jayChunks = Logic.chunkChatByMember(pastedRollup, 3500).filter(function (part) {
   return part.indexOf('Dr. Jayaram Nambiar') >= 0 || part.indexOf('shibus rendition') >= 0;
 });
@@ -770,5 +818,83 @@ const fromStoredPaste = Logic.buildWeeklyChatMessage(
 assert.strictEqual(fromStoredPaste.indexOf('• Wed, Nov 4:'), -1);
 assert.strictEqual(fromStoredPaste.indexOf('(4h)'), -1);
 assert.ok(fromStoredPaste.indexOf('DSP and mic configuration') >= 0);
+
+const diaryBlocks = [
+  {
+    member: 'Neena A Panicker',
+    entries: [
+      { ymd: '2026-11-16', summary: 'regenerated summary for gastroenterology new visits through admin console' },
+      { ymd: '2026-11-16', summary: 'coordinated with Jose and Godly to troubleshoot and resolve the CORS and authentication issues' }
+    ]
+  },
+  {
+    member: 'Dr. Jayaram Nambiar',
+    entries: [
+      { ymd: '2026-11-17', summary: 'vibe coded an audio to transcript aligner and cutter' },
+      {
+        ymd: '2026-11-21',
+        summary: 'performed a clinical quality audit on new visit summaries',
+        blockers: 'Revisit template based ai summaries to be generated for re-visits'
+      }
+    ]
+  }
+];
+const diaryReply = [
+  '• Neena A Panicker',
+  'On 2026-11-16, Neena A Panicker regenerated summary for gastroenterology new visits through admin console.',
+  'On 2026-11-16, Neena A Panicker coordinated with Jose and Godly to troubleshoot and resolve the CORS and authentication issues.',
+  '• Dr. Jayaram Nambiar',
+  'On 2026-11-17, Dr. Jayaram Nambiar vibe coded an audio to transcript aligner and cutter.',
+  'On 2026-11-21, Dr. Jayaram Nambiar performed a clinical quality audit on new visit summaries.',
+  'Blocker: Revisit template based ai summaries to be generated for re-visits.'
+].join('\n');
+const cleanBullets = [
+  '• Neena A Panicker',
+  '- Regenerated the gastroenterology summaries and resolved the CORS and authentication issues with Jose and Godly.',
+  '• Dr. Jayaram Nambiar',
+  '- Built an audio to transcript aligner and cutter, then audited new-visit summaries.',
+  '- Blocker: Revisit template based ai summaries to be generated for re-visits.'
+].join('\n');
+const cleanDecision = Logic.interpretWeeklySummaryAttempt(cleanBullets, false, diaryBlocks);
+assert.strictEqual(cleanDecision.action, 'accept');
+assert.strictEqual(cleanDecision.text.indexOf('On 2026-11-16'), -1);
+const diaryDecision = Logic.interpretWeeklySummaryAttempt(diaryReply, false, diaryBlocks);
+assert.strictEqual(diaryDecision.action, 'reject');
+assert.strictEqual(Logic.weeklyStoredSummaryIsUsable(diaryReply, diaryBlocks), false);
+assert.strictEqual(Logic.weeklyStoredSummaryIsUsable(cleanBullets, diaryBlocks), true);
+const repaired = Logic.buildWeeklyChatMessage(
+  'PRJ_VOX',
+  '2026-11-16',
+  '2026-11-22',
+  diaryReply,
+  diaryBlocks
+);
+assert.strictEqual(repaired.indexOf('On 2026-11-16'), -1);
+assert.strictEqual(repaired.indexOf('On 2026-11-17'), -1);
+const neenaRepaired = repaired.slice(
+  repaired.indexOf('• Neena A Panicker'),
+  repaired.indexOf('• Dr. Jayaram Nambiar')
+);
+assert.strictEqual((neenaRepaired.match(/Neena A Panicker/g) || []).length, 1);
+assert.ok(neenaRepaired.indexOf('\n- ') >= 0);
+assert.ok(neenaRepaired.indexOf('CORS') >= 0);
+assert.strictEqual(neenaRepaired.indexOf('2026-11-'), -1);
+const jayRepaired = repaired.slice(repaired.indexOf('• Dr. Jayaram Nambiar'));
+assert.strictEqual((jayRepaired.match(/Dr\. Jayaram Nambiar/g) || []).length, 1);
+assert.ok(jayRepaired.indexOf('\n- ') >= 0);
+assert.ok(jayRepaired.indexOf('Blocker: Revisit template based ai summaries to be generated for re-visits.') >= 0);
+assert.strictEqual(jayRepaired.indexOf('2026-11-'), -1);
+const chain = Logic.selectWeeklyFallbackReply([
+  { model: 'google/gemma-4-31b-it:free', text: diaryReply, truncated: false },
+  { model: 'google/gemma-4-26b-a4b-it:free', text: cleanBullets, truncated: false }
+], diaryBlocks);
+assert.strictEqual(chain.status, 'accepted');
+assert.strictEqual(chain.model, 'google/gemma-4-26b-a4b-it:free');
+assert.strictEqual(chain.text.indexOf('On 2026-11-'), -1);
+const exhaustedChain = Logic.selectWeeklyFallbackReply([
+  { model: 'google/gemma-4-31b-it:free', text: diaryReply, truncated: false },
+  { model: 'openrouter/free', text: '', truncated: false }
+], diaryBlocks);
+assert.strictEqual(exhaustedChain.status, 'exhausted');
 
 console.log('logic.test.js passed');

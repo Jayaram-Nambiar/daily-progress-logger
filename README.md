@@ -78,7 +78,7 @@ Members type a daily row on their own tab: date, summary, hours, blockers, tomor
 | Weekdays ~6:00 PM | `sendReminder_trigger` | For each space, pings members whose **Reminder Matrix** cell is checked and who have no today summary for that space. Includes the workbook URL. One email per person lists every space they are missing. |
 | Every day ~7:00 PM | `postDailyUpdatesToChat_trigger` | Posts today's rows, split by the Space column, to each space whose Script Property webhook is set. Saturday, Sunday, and a holiday are included when that day is today. Recognized GitHub issue URLs are appended on that summary line. |
 | Every hour | `formatGithubIssues_trigger` | Rewrites today's GitHub Issues cells to linked issue numbers. Does not post to Chat. The 7:00 PM post and the Monday roll-up format again before they read the sheet. |
-| Monday ~9:00 AM | `weeklyRollup_trigger` | Formats last week's GitHub Issues cells, writes **Weekly Rollup**, then posts one summary to each space with a webhook. Those issue URLs stay out of the Monday message and the OpenRouter prompt. Uses OpenRouter free models when `OPENROUTER_API_KEY` is set (`gemma-4-31b-it:free`, then `gemma-4-26b-a4b-it:free`, then `openrouter/free`). The prompt uses member names and `[YYYY-MM-DD]` tags. Each member gets one section in date order: one short sentence per outcome, simple past, member as the subject. Saturday, Sunday, and holidays in the source stay in that section. One member stays in one Chat message. A long week is split between members so one member is not summarized twice. A stored summary that was cut off, or that is still the daily lines, is generated again. A member still missing is added as one short sentence per logged outcome. If every model fails, the post is those sentences, not the daily lines. |
+| Monday ~9:00 AM | `weeklyRollup_trigger` | Formats last week's GitHub Issues cells, writes **Weekly Rollup**, then posts one summary to each space with a webhook. Those issue URLs stay out of the Monday message and the OpenRouter prompt. Uses OpenRouter free models when `OPENROUTER_API_KEY` is set (`gemma-4-31b-it:free`, then `gemma-4-26b-a4b-it:free`, then `openrouter/free`). The prompt uses member names and `[YYYY-MM-DD]` tags. Each member gets two to five bullets that summarize the week in chronological order. Calendar dates are left out, the name appears once on the • line, and links are left out. A line-by-line On <date>, <name> reply is rejected and the next free model is tried. Saturday, Sunday, and holidays in the source stay in those bullets. One member stays in one Chat message. A long week is split between members so one member is not summarized twice. A stored summary that was cut off, or that is still the daily lines, is generated again. A member still missing is added as bullets from that member's rows. If every model fails, the post is one bullet per logged item, not the daily lines. |
 
 Team column **E Spaces** lists which Chat spaces each member belongs to (multi-select chips). Fill it from Chat, then run **Apply Team spaces to reminder matrix**. Non-member matrix cells become blank. The script never calls the Chat API.
 
@@ -207,7 +207,7 @@ This writes **Weekly Rollup** and posts the previous Monday–Sunday week to eac
 4. Open **Weekly Space Summaries** when OpenRouter is on.
 5. Open one Chat space and read the post.
 
-Last week’s GitHub Issues cells are formatted first. Those URLs stay out of the Monday message and out of the model prompt. When OpenRouter returns a summary, Chat gets that summary, and any member the model omitted is added as one short sentence per logged outcome. When every model fails, or the stored text is still the daily lines, Chat gets those sentences instead of the sheet lines. A space with no rows for the week gets no post.
+Last week’s GitHub Issues cells are formatted first. Those URLs stay out of the Monday message and out of the model prompt. When OpenRouter returns a summary, Chat gets that summary, and any member the model omitted is added as bullets from that member's rows. When every model fails, or the stored text is still the daily lines or a line-by-line diary, Chat gets one bullet per logged item instead of the sheet lines. A space with no rows for the week gets no post.
 
 ### Sync reminder matrix
 
@@ -253,7 +253,7 @@ Apps Script may start a clock job up to about 15 minutes after the minute you se
 
 ### Set OpenRouter API key
 
-Monday posts still go out when this key is empty. Each logged outcome is one short sentence. The key is a Script Property. Keep it out of git, the sheet, and Chat.
+Monday posts still go out when this key is empty. Each member is a name line plus one bullet per logged item. The key is a Script Property. Keep it out of git, the sheet, and Chat.
 
 1. Create a free-tier key at [openrouter.ai](https://openrouter.ai/).
 2. Click **Set OpenRouter API key**.
